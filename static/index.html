@@ -91,6 +91,19 @@
   .btn:disabled { background: var(--line); color: var(--muted); cursor: not-allowed; }
   .btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
+  .btn.secondary { background: var(--surface); color: var(--accent); border: 1px solid var(--accent); }
+  .btn.secondary:hover { background: var(--accent-soft); filter: none; }
+
+  .camera-modal {
+    display: none; position: fixed; inset: 0; background: rgba(22, 32, 43, .7);
+    align-items: center; justify-content: center; z-index: 50; padding: 20px;
+  }
+  .camera-modal.open { display: flex; }
+  .camera-box { background: var(--surface); border-radius: 10px; padding: 16px; max-width: 480px; width: 100%; }
+  .camera-box video { width: 100%; border-radius: 8px; background: #000; display: block; }
+  .camera-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .camera-actions .btn { margin-top: 0; }
+
   .result-card {
     border: 1px solid var(--line); border-left: 4px solid var(--match);
     border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: var(--surface);
@@ -146,6 +159,7 @@
           <small>JPG / PNG · boleh berisi banyak wajah</small>
         </div>
         <input type="file" id="idFile" accept="image/*" hidden>
+        <button class="btn secondary" id="idCameraBtn" type="button">AMBIL DARI KAMERA</button>
         <div class="viewer" id="idViewer"><img id="idImg" alt="Foto diperiksa"><canvas id="idCanvas"></canvas></div>
         <label>Threshold kemiripan: <span id="thVal">0.40</span></label>
         <input type="range" id="threshold" min="0.30" max="0.60" step="0.01" value="0.40">
@@ -169,6 +183,7 @@
           <small>satu wajah jelas, pencahayaan cukup</small>
         </div>
         <input type="file" id="regFile" accept="image/*" hidden>
+        <button class="btn secondary" id="regCameraBtn" type="button">AMBIL DARI KAMERA</button>
         <div class="viewer" id="regViewer"><img id="regImg" alt="Foto pendaftaran"></div>
         <label>Nama orang</label>
         <input type="text" id="regName" placeholder="contoh: Budi Santoso">
@@ -193,6 +208,17 @@
       <div id="peopleList"><div class="empty">Memuat…</div></div>
     </div>
   </section>
+</div>
+
+<div class="camera-modal" id="cameraModal">
+  <div class="camera-box">
+    <video id="cameraVideo" autoplay playsinline muted></video>
+    <canvas id="cameraCanvas" hidden></canvas>
+    <div class="camera-actions">
+      <button class="btn" id="captureBtn" type="button">AMBIL FOTO</button>
+      <button class="btn secondary" id="closeCameraBtn" type="button">TUTUP</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -237,7 +263,7 @@ function showMsg(el, text, type) {
 let idFileObj = null;
 let lastImageMeta = null;
 
-setupDrop($("#idDrop"), $("#idFile"), (f) => {
+function handleIdFile(f) {
   idFileObj = f;
   $("#idImg").src = URL.createObjectURL(f);
   $("#idViewer").style.display = "block";
@@ -245,7 +271,10 @@ setupDrop($("#idDrop"), $("#idFile"), (f) => {
   $("#idCanvas").getContext("2d").clearRect(0, 0, 9999, 9999);
   $("#idResults").innerHTML = '<div class="empty">Siap diperiksa.</div>';
   $("#idMsg").className = "msg";
-});
+}
+
+setupDrop($("#idDrop"), $("#idFile"), handleIdFile);
+$("#idCameraBtn").addEventListener("click", () => openCamera(handleIdFile));
 
 $("#threshold").addEventListener("input", (e) => { $("#thVal").textContent = e.target.value; });
 
@@ -328,13 +357,16 @@ function drawBoxes(faces) {
 
 // ---------- Daftarkan ----------
 let regFileObj = null;
-setupDrop($("#regDrop"), $("#regFile"), (f) => {
+function handleRegFile(f) {
   regFileObj = f;
   $("#regImg").src = URL.createObjectURL(f);
   $("#regViewer").style.display = "block";
   $("#regBtn").disabled = false;
   $("#regMsg").className = "msg";
-});
+}
+
+setupDrop($("#regDrop"), $("#regFile"), handleRegFile);
+$("#regCameraBtn").addEventListener("click", () => openCamera(handleRegFile));
 
 $("#regBtn").addEventListener("click", async () => {
   const name = $("#regName").value.trim();
@@ -359,6 +391,53 @@ $("#regBtn").addEventListener("click", async () => {
     btn.disabled = false; btn.textContent = "DAFTARKAN WAJAH";
   }
 });
+
+// ---------- Kamera ----------
+let cameraStream = null;
+let cameraCallback = null;
+
+function openCamera(onCapture) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert("Browser ini tidak mendukung akses kamera.");
+    return;
+  }
+  cameraCallback = onCapture;
+  $("#cameraModal").classList.add("open");
+  navigator.mediaDevices.getUserMedia({ video: true })
+    .then((stream) => {
+      cameraStream = stream;
+      $("#cameraVideo").srcObject = stream;
+    })
+    .catch((err) => {
+      alert("Tidak bisa mengakses kamera: " + err.message);
+      closeCamera();
+    });
+}
+
+function closeCamera() {
+  $("#cameraModal").classList.remove("open");
+  if (cameraStream) {
+    cameraStream.getTracks().forEach((t) => t.stop());
+    cameraStream = null;
+  }
+  cameraCallback = null;
+}
+
+$("#captureBtn").addEventListener("click", () => {
+  const video = $("#cameraVideo");
+  const canvas = $("#cameraCanvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  canvas.toBlob((blob) => {
+    const file = new File([blob], "kamera.jpg", { type: "image/jpeg" });
+    const cb = cameraCallback;
+    closeCamera();
+    if (cb) cb(file);
+  }, "image/jpeg", 0.92);
+});
+
+$("#closeCameraBtn").addEventListener("click", closeCamera);
 
 // ---------- Database ----------
 async function loadPeople() {
