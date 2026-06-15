@@ -111,6 +111,15 @@
   .camera-actions { display: flex; gap: 8px; margin-top: 12px; }
   .camera-actions .btn { margin-top: 0; }
 
+  .rt-box { position: relative; border-radius: 8px; overflow: hidden; background: #000; }
+  .rt-box video { width: 100%; max-height: 70vh; display: block; }
+  .rt-box canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .rt-status {
+    font-family: var(--mono); font-size: 0.72rem; color: var(--muted);
+    margin-top: 10px;
+  }
+  .rt-status.live { color: var(--match); }
+
   .result-card {
     border: 1px solid var(--line); border-left: 4px solid var(--match);
     border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: var(--surface);
@@ -173,6 +182,7 @@
   <nav>
     <button class="active" data-tab="identify">IDENTIFIKASI</button>
     <button data-tab="register">DAFTARKAN</button>
+    <button data-tab="realtime">REALTIME</button>
     <button data-tab="db">DATABASE</button>
   </nav>
 
@@ -228,6 +238,29 @@
     </div>
   </section>
 
+  <!-- ============ REALTIME ============ -->
+  <section class="panel" id="panel-realtime">
+    <div class="grid">
+      <div class="card">
+        <div class="eyebrow">Kamera langsung</div>
+        <div class="rt-box">
+          <video id="rtVideo" autoplay playsinline muted></video>
+          <canvas id="rtCanvas"></canvas>
+        </div>
+        <label>Threshold kemiripan: <span id="rtThVal">0.40</span></label>
+        <input type="range" id="rtThreshold" min="0.30" max="0.60" step="0.01" value="0.40">
+        <button class="btn" id="rtStartBtn" type="button">MULAI KAMERA</button>
+        <button class="btn secondary" id="rtStopBtn" type="button" hidden>HENTIKAN KAMERA</button>
+        <div class="rt-status" id="rtStatus">Kamera belum aktif.</div>
+        <div class="msg" id="rtMsg"></div>
+      </div>
+      <div class="card">
+        <div class="eyebrow">Wajah terdeteksi</div>
+        <div id="rtResults"><div class="empty">Mulai kamera untuk memulai deteksi.</div></div>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ DATABASE ============ -->
   <section class="panel" id="panel-db">
     <div class="card">
@@ -259,6 +292,7 @@ document.querySelectorAll("nav button").forEach((b) => {
     b.classList.add("active");
     $("#panel-" + b.dataset.tab).classList.add("active");
     if (b.dataset.tab === "db") loadPeople();
+    if (b.dataset.tab !== "realtime") stopRealtime();
   });
 });
 
@@ -581,6 +615,138 @@ $("#captureBtn").addEventListener("click", () => {
 });
 
 $("#closeCameraBtn").addEventListener("click", closeCamera);
+
+// ---------- Realtime ----------
+let rtStream = null;
+let rtInterval = null;
+let rtBusy = false;
+let rtImageMeta = null;
+
+$("#rtThreshold").addEventListener("input", (e) => { $("#rtThVal").textContent = e.target.value; });
+
+async function startRealtime() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showMsg($("#rtMsg"), "Browser ini tidak mendukung akses kamera.", "err");
+    return;
+  }
+  $("#rtMsg").className = "msg";
+
+  try {
+    rtStream = await navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: { ideal: "environment" } } })
+      .catch(() => navigator.mediaDevices.getUserMedia({ video: true }));
+  } catch (err) {
+    showMsg($("#rtMsg"), "Tidak bisa mengakses kamera: " + err.message, "err");
+    return;
+  }
+
+  $("#rtVideo").srcObject = rtStream;
+  $("#rtStartBtn").hidden = true;
+  $("#rtStopBtn").hidden = false;
+  $("#rtStatus").textContent = "Live · mendeteksi…";
+  $("#rtStatus").classList.add("live");
+  $("#rtResults").innerHTML = '<div class="empty">Mendeteksi…</div>';
+
+  rtInterval = setInterval(captureAndIdentify, 1500);
+}
+
+function stopRealtime() {
+  if (rtInterval) { clearInterval(rtInterval); rtInterval = null; }
+  if (rtStream) { rtStream.getTracks().forEach((t) => t.stop()); rtStream = null; }
+  rtBusy = false;
+  $("#rtVideo").srcObject = null;
+  $("#rtStartBtn").hidden = false;
+  $("#rtStopBtn").hidden = true;
+  $("#rtStatus").textContent = "Kamera belum aktif.";
+  $("#rtStatus").classList.remove("live");
+  const ctx = $("#rtCanvas").getContext("2d");
+  ctx.clearRect(0, 0, $("#rtCanvas").width, $("#rtCanvas").height);
+  $("#rtResults").innerHTML = '<div class="empty">Mulai kamera untuk memulai deteksi.</div>';
+}
+
+async function captureAndIdentify() {
+  if (rtBusy) return;
+  const video = $("#rtVideo");
+  if (!video.videoWidth) return;
+  rtBusy = true;
+
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.8));
+
+    const fd = new FormData();
+    fd.append("file", new File([blob], "live.jpg", { type: "image/jpeg" }));
+    fd.append("threshold", $("#rtThreshold").value);
+
+    const r = await fetch("/api/identify", { method: "POST", body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Gagal memproses");
+
+    rtImageMeta = d.image;
+    drawRtBoxes(d.faces);
+    renderRtResults(d.faces);
+    $("#rtMsg").className = "msg";
+  } catch (err) {
+    showMsg($("#rtMsg"), err.message, "err");
+  } finally {
+    rtBusy = false;
+  }
+}
+
+function drawRtBoxes(faces) {
+  const video = $("#rtVideo");
+  const canvas = $("#rtCanvas");
+  canvas.width = video.clientWidth;
+  canvas.height = video.clientHeight;
+  const sx = canvas.width / rtImageMeta.width;
+  const sy = canvas.height / rtImageMeta.height;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.font = "600 12px 'JetBrains Mono', monospace";
+  faces.forEach((f) => {
+    const known = !!f.best;
+    const color = known ? "#176B3A" : "#9A4A12";
+    const x = f.bbox.x1 * sx, y = f.bbox.y1 * sy;
+    const w = (f.bbox.x2 - f.bbox.x1) * sx, h = (f.bbox.y2 - f.bbox.y1) * sy;
+    ctx.strokeStyle = color; ctx.lineWidth = 2.5;
+    ctx.strokeRect(x, y, w, h);
+    const label = known ? f.best.name : "Tidak dikenal";
+    const tw = ctx.measureText(label).width + 10;
+    ctx.fillStyle = color;
+    ctx.fillRect(x, Math.max(0, y - 18), tw, 18);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(label, x + 5, Math.max(12, y - 5));
+  });
+}
+
+function renderRtResults(faces) {
+  const box = $("#rtResults");
+  if (!faces.length) {
+    box.innerHTML = '<div class="empty">Tidak ada wajah terdeteksi.</div>';
+    return;
+  }
+  box.innerHTML = faces.map((f) => {
+    if (f.best) {
+      const pct = (f.best.similarity * 100).toFixed(1);
+      return `<div class="result-card">
+        <h3>${f.best.name}</h3>
+        <div class="pct">kemiripan ${pct}% · deteksi ${f.det_score}</div>
+        <div class="meter"><i style="width:${pct}%"></i></div>
+      </div>`;
+    }
+    return `<div class="result-card unknown">
+      <h3>Tidak dikenal</h3>
+      <div class="pct">tidak ada kecocokan di atas threshold · deteksi ${f.det_score}</div>
+      <div class="meter"><i style="width:8%"></i></div>
+    </div>`;
+  }).join("");
+}
+
+$("#rtStartBtn").addEventListener("click", startRealtime);
+$("#rtStopBtn").addEventListener("click", stopRealtime);
 
 // ---------- Database ----------
 async function loadPeople() {
