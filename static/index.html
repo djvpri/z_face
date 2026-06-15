@@ -259,11 +259,32 @@ function showMsg(el, text, type) {
   el.className = "msg " + type;
 }
 
+// ---------- Kompresi gambar ----------
+// Perkecil foto sebelum diunggah agar upload tidak lambat di koneksi pelan.
+// Server juga membatasi ke 1600px, jadi mengirim lebih besar dari itu sia-sia.
+async function resizeImage(file, maxSide = 1600, quality = 0.85) {
+  const bitmap = await createImageBitmap(file);
+  const { width, height } = bitmap;
+  if (Math.max(width, height) <= maxSide) {
+    bitmap.close();
+    return file;
+  }
+  const scale = maxSide / Math.max(width, height);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(width * scale);
+  canvas.height = Math.round(height * scale);
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+  return new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" });
+}
+
 // ---------- Identifikasi ----------
 let idFileObj = null;
 let lastImageMeta = null;
 
-function handleIdFile(f) {
+async function handleIdFile(f) {
+  f = await resizeImage(f);
   idFileObj = f;
   $("#idImg").src = URL.createObjectURL(f);
   $("#idViewer").style.display = "block";
@@ -357,7 +378,8 @@ function drawBoxes(faces) {
 
 // ---------- Daftarkan ----------
 let regFileObj = null;
-function handleRegFile(f) {
+async function handleRegFile(f) {
+  f = await resizeImage(f);
   regFileObj = f;
   $("#regImg").src = URL.createObjectURL(f);
   $("#regViewer").style.display = "block";
