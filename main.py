@@ -204,7 +204,7 @@ class LogEntryRequest(BaseModel):
 def create_log(body: LogEntryRequest):
     """Catat satu hasil deteksi (dikenal maupun tidak dikenal) ke riwayat."""
     require_db()
-    if body.source not in ("identify", "realtime"):
+    if body.source not in ("identify", "realtime", "guest"):
         raise HTTPException(status_code=400, detail="Source tidak valid")
 
     supabase.table("detection_logs").insert(

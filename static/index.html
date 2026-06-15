@@ -120,6 +120,21 @@
   }
   .rt-status.live { color: var(--match); }
 
+  .guest-stage { position: relative; border-radius: 10px; overflow: hidden; background: #000; }
+  .guest-stage video { width: 100%; max-height: 80vh; display: block; }
+  .guest-greeting {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 22px 20px; text-align: center; color: #fff;
+    background: linear-gradient(transparent, rgba(0, 0, 0, .78));
+  }
+  .guest-greeting-text { font-family: var(--display); font-size: 1.5rem; font-weight: 700; }
+  .guest-greeting-sub { font-family: var(--mono); font-size: 0.8rem; opacity: .85; margin-top: 4px; }
+  .guest-greeting.known .guest-greeting-text { color: #8FE3C8; }
+  .guest-greeting.unknown .guest-greeting-text { color: #FFC79A; }
+  @media (max-width: 480px) {
+    .guest-greeting-text { font-size: 1.15rem; }
+  }
+
   .result-card {
     border: 1px solid var(--line); border-left: 4px solid var(--match);
     border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: var(--surface);
@@ -193,6 +208,7 @@
     <button class="active" data-tab="identify">IDENTIFIKASI</button>
     <button data-tab="register">DAFTARKAN</button>
     <button data-tab="realtime">REALTIME</button>
+    <button data-tab="guest">TAMU</button>
     <button data-tab="logs">RIWAYAT</button>
     <button data-tab="db">DATABASE</button>
   </nav>
@@ -272,6 +288,23 @@
     </div>
   </section>
 
+  <!-- ============ TAMU ============ -->
+  <section class="panel" id="panel-guest">
+    <div class="card">
+      <div class="eyebrow">Mode penerima tamu</div>
+      <div class="guest-stage">
+        <video id="guestVideo" autoplay playsinline muted></video>
+        <div class="guest-greeting" id="guestGreeting">
+          <div class="guest-greeting-text">Arahkan wajah ke kamera</div>
+          <div class="guest-greeting-sub"></div>
+        </div>
+      </div>
+      <button class="btn" id="guestStartBtn" type="button">MULAI MODE TAMU</button>
+      <button class="btn secondary" id="guestStopBtn" type="button" hidden>HENTIKAN</button>
+      <div class="msg" id="guestMsg"></div>
+    </div>
+  </section>
+
   <!-- ============ RIWAYAT ============ -->
   <section class="panel" id="panel-logs">
     <div class="card">
@@ -314,6 +347,7 @@ document.querySelectorAll("nav button").forEach((b) => {
     if (b.dataset.tab === "db") loadPeople();
     if (b.dataset.tab === "logs") loadLogs();
     if (b.dataset.tab !== "realtime") stopRealtime();
+    if (b.dataset.tab !== "guest") stopGuest();
   });
 });
 
@@ -499,6 +533,20 @@ function logFaces(faces, source) {
   });
 }
 
+const detectionCooldown = new Map();
+const LOG_COOLDOWN = 30000; // jeda 30 detik per identitas per sumber agar riwayat tidak penuh
+
+function logDetections(faces, source) {
+  const now = Date.now();
+  faces.forEach((f) => {
+    const key = source + ":" + (f.best ? f.best.name : "__unknown__");
+    const last = detectionCooldown.get(key) || 0;
+    if (now - last < LOG_COOLDOWN) return;
+    detectionCooldown.set(key, now);
+    logFaces([f], source);
+  });
+}
+
 async function loadLogs() {
   const box = $("#logsList");
   box.innerHTML = '<div class="empty">Memuat…</div>';
@@ -514,7 +562,7 @@ async function loadLogs() {
       const known = !!l.name;
       const nama = known ? l.name : "Tidak dikenal";
       const pct = l.similarity != null ? `${(l.similarity * 100).toFixed(1)}%` : "-";
-      const sumber = l.source === "realtime" ? "Realtime" : "Identifikasi";
+      const sumber = l.source === "realtime" ? "Realtime" : l.source === "guest" ? "Tamu" : "Identifikasi";
       return `<div class="log-row">
         <div>
           <span class="log-name${known ? "" : " unknown"}">${nama}</span>
@@ -689,19 +737,6 @@ let rtStream = null;
 let rtInterval = null;
 let rtBusy = false;
 let rtImageMeta = null;
-const rtLastLogged = new Map();
-const RT_LOG_COOLDOWN = 30000; // jeda 30 detik per orang/identitas agar riwayat tidak penuh
-
-function logRealtimeFaces(faces) {
-  const now = Date.now();
-  faces.forEach((f) => {
-    const key = f.best ? f.best.name : "__unknown__";
-    const last = rtLastLogged.get(key) || 0;
-    if (now - last < RT_LOG_COOLDOWN) return;
-    rtLastLogged.set(key, now);
-    logFaces([f], "realtime");
-  });
-}
 
 $("#rtThreshold").addEventListener("input", (e) => { $("#rtThVal").textContent = e.target.value; });
 
@@ -769,7 +804,7 @@ async function captureAndIdentify() {
     rtImageMeta = d.image;
     drawRtBoxes(d.faces);
     renderRtResults(d.faces);
-    logRealtimeFaces(d.faces);
+    logDetections(d.faces, "realtime");
     $("#rtMsg").className = "msg";
   } catch (err) {
     showMsg($("#rtMsg"), err.message, "err");
@@ -829,6 +864,113 @@ function renderRtResults(faces) {
 
 $("#rtStartBtn").addEventListener("click", startRealtime);
 $("#rtStopBtn").addEventListener("click", stopRealtime);
+
+// ---------- Mode Tamu ----------
+let guestStream = null;
+let guestInterval = null;
+let guestBusy = false;
+
+async function startGuest() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showMsg($("#guestMsg"), "Browser ini tidak mendukung akses kamera.", "err");
+    return;
+  }
+  $("#guestMsg").className = "msg";
+
+  try {
+    guestStream = await navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: { ideal: "environment" } } })
+      .catch(() => navigator.mediaDevices.getUserMedia({ video: true }));
+  } catch (err) {
+    showMsg($("#guestMsg"), "Tidak bisa mengakses kamera: " + err.message, "err");
+    return;
+  }
+
+  $("#guestVideo").srcObject = guestStream;
+  $("#guestStartBtn").hidden = true;
+  $("#guestStopBtn").hidden = false;
+  resetGuestGreeting();
+
+  guestInterval = setInterval(captureGuest, 1500);
+}
+
+function stopGuest() {
+  if (guestInterval) { clearInterval(guestInterval); guestInterval = null; }
+  if (guestStream) { guestStream.getTracks().forEach((t) => t.stop()); guestStream = null; }
+  guestBusy = false;
+  $("#guestVideo").srcObject = null;
+  $("#guestStartBtn").hidden = false;
+  $("#guestStopBtn").hidden = true;
+  resetGuestGreeting();
+}
+
+function resetGuestGreeting() {
+  const el = $("#guestGreeting");
+  el.className = "guest-greeting";
+  el.querySelector(".guest-greeting-text").textContent = "Arahkan wajah ke kamera";
+  el.querySelector(".guest-greeting-sub").textContent = "";
+}
+
+async function captureGuest() {
+  if (guestBusy) return;
+  const video = $("#guestVideo");
+  if (!video.videoWidth) return;
+  guestBusy = true;
+
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.8));
+
+    const fd = new FormData();
+    fd.append("file", new File([blob], "guest.jpg", { type: "image/jpeg" }));
+    fd.append("threshold", "0.40");
+
+    const r = await fetch("/api/identify", { method: "POST", body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Gagal memproses");
+
+    updateGuestGreeting(d.faces);
+    logDetections(d.faces, "guest");
+    $("#guestMsg").className = "msg";
+  } catch (err) {
+    showMsg($("#guestMsg"), err.message, "err");
+  } finally {
+    guestBusy = false;
+  }
+}
+
+function updateGuestGreeting(faces) {
+  if (!faces.length) {
+    resetGuestGreeting();
+    return;
+  }
+
+  const main = faces.reduce((a, b) => {
+    const areaA = (a.bbox.x2 - a.bbox.x1) * (a.bbox.y2 - a.bbox.y1);
+    const areaB = (b.bbox.x2 - b.bbox.x1) * (b.bbox.y2 - b.bbox.y1);
+    return areaB > areaA ? b : a;
+  });
+
+  const el = $("#guestGreeting");
+  const text = el.querySelector(".guest-greeting-text");
+  const sub = el.querySelector(".guest-greeting-sub");
+
+  if (main.best) {
+    el.className = "guest-greeting known";
+    text.textContent = `Selamat datang, ${main.best.name}!`;
+    sub.textContent = `kemiripan ${(main.best.similarity * 100).toFixed(1)}%`;
+  } else {
+    el.className = "guest-greeting unknown";
+    text.textContent = "Halo! Wajah belum terdaftar";
+    sub.textContent = "Silakan hubungi resepsionis untuk pendaftaran";
+  }
+}
+
+$("#guestStartBtn").addEventListener("click", startGuest);
+$("#guestStopBtn").addEventListener("click", stopGuest);
 
 // ---------- Database ----------
 async function loadPeople() {
