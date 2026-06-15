@@ -206,3 +206,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get("/")
 def index():
     return FileResponse("static/index.html")
+
+
+@app.get("/sw.js")
+def service_worker():
+    # Disajikan dari root agar scope service worker mencakup seluruh app
+    return FileResponse("static/sw.js", media_type="application/javascript")
