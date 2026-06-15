@@ -123,6 +123,16 @@
   .result-card.unknown .meter i { background: var(--nomatch); }
   .alts { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); margin-top: 8px; }
 
+  .quick-reg { display: flex; gap: 8px; margin-top: 10px; }
+  .quick-reg input { flex: 1; margin: 0; }
+  .quick-reg button {
+    flex: none; width: auto; margin: 0; padding: 10px 14px;
+    font-size: 0.7rem; white-space: nowrap;
+  }
+  .quick-reg-msg { font-size: 0.78rem; margin-top: 6px; }
+  .quick-reg-msg.ok { color: var(--match); }
+  .quick-reg-msg.err { color: var(--nomatch); }
+
   .person-row {
     display: flex; justify-content: space-between; align-items: center;
     flex-wrap: wrap; gap: 8px;
@@ -299,6 +309,7 @@ async function resizeImage(file, maxSide = 1600, quality = 0.85) {
 // ---------- Identifikasi ----------
 let idFileObj = null;
 let lastImageMeta = null;
+let lastFaces = [];
 
 async function handleIdFile(f) {
   f = await resizeImage(f);
@@ -332,6 +343,7 @@ $("#idBtn").addEventListener("click", async () => {
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || "Gagal memproses");
     lastImageMeta = d.image;
+    lastFaces = d.faces;
     renderResults(d.faces);
     drawBoxes(d.faces);
   } catch (err) {
@@ -352,19 +364,86 @@ function renderResults(faces) {
     if (f.best) {
       const pct = (f.best.similarity * 100).toFixed(1);
       const alts = f.matches.slice(1).map((m) => `${m.name} (${(m.similarity * 100).toFixed(1)}%)`).join(" · ");
-      return `<div class="result-card">
+      return `<div class="result-card" id="face-card-${i}">
         <h3>Wajah ${i + 1}: ${f.best.name}</h3>
         <div class="pct">kemiripan ${pct}% · deteksi ${f.det_score}</div>
         <div class="meter"><i style="width:${pct}%"></i></div>
         ${alts ? `<div class="alts">kandidat lain: ${alts}</div>` : ""}
       </div>`;
     }
-    return `<div class="result-card unknown">
+    return `<div class="result-card unknown" id="face-card-${i}">
       <h3>Wajah ${i + 1}: Tidak dikenal</h3>
       <div class="pct">tidak ada kecocokan di atas threshold · deteksi ${f.det_score}</div>
       <div class="meter"><i style="width:8%"></i></div>
+      <div class="quick-reg">
+        <input type="text" class="quick-reg-name" placeholder="Nama orang ini">
+        <button class="btn secondary" data-idx="${i}" type="button">DAFTARKAN</button>
+      </div>
+      <div class="quick-reg-msg"></div>
     </div>`;
   }).join("");
+
+  box.querySelectorAll(".quick-reg button").forEach((btn) => {
+    btn.addEventListener("click", () => registerFaceFromResult(Number(btn.dataset.idx)));
+  });
+}
+
+// Crop area wajah (dengan padding) dari foto asli agar bisa langsung
+// dikirim ke /api/register tanpa perlu unggah ulang.
+async function cropFace(file, bbox, meta, padRatio = 0.4) {
+  const bitmap = await createImageBitmap(file);
+  const padX = (bbox.x2 - bbox.x1) * padRatio;
+  const padY = (bbox.y2 - bbox.y1) * padRatio;
+  const x1 = Math.max(0, bbox.x1 - padX);
+  const y1 = Math.max(0, bbox.y1 - padY);
+  const x2 = Math.min(meta.width, bbox.x2 + padX);
+  const y2 = Math.min(meta.height, bbox.y2 + padY);
+  const canvas = document.createElement("canvas");
+  canvas.width = x2 - x1;
+  canvas.height = y2 - y1;
+  canvas.getContext("2d").drawImage(bitmap, x1, y1, canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+  return new File([blob], "wajah.jpg", { type: "image/jpeg" });
+}
+
+async function registerFaceFromResult(idx) {
+  const card = $("#face-card-" + idx);
+  const nameInput = card.querySelector(".quick-reg-name");
+  const btn = card.querySelector(".quick-reg button");
+  const msg = card.querySelector(".quick-reg-msg");
+  const name = nameInput.value.trim();
+  if (!name) {
+    msg.textContent = "Isi nama dulu";
+    msg.className = "quick-reg-msg err";
+    return;
+  }
+
+  btn.disabled = true; nameInput.disabled = true;
+  btn.textContent = "MENYIMPAN…";
+  msg.textContent = "";
+  msg.className = "quick-reg-msg";
+
+  try {
+    const cropped = await cropFace(idFileObj, lastFaces[idx].bbox, lastImageMeta);
+    const fd = new FormData();
+    fd.append("name", name);
+    fd.append("file", cropped);
+    const r = await fetch("/api/register", { method: "POST", body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Gagal mendaftarkan");
+
+    msg.textContent = `${name} berhasil didaftarkan.`;
+    msg.className = "quick-reg-msg ok";
+    card.classList.remove("unknown");
+    card.querySelector("h3").textContent = `Wajah ${idx + 1}: ${name}`;
+    card.querySelector(".quick-reg").remove();
+  } catch (err) {
+    msg.textContent = err.message;
+    msg.className = "quick-reg-msg err";
+    btn.disabled = false; nameInput.disabled = false;
+    btn.textContent = "DAFTARKAN";
+  }
 }
 
 function drawBoxes(faces) {
