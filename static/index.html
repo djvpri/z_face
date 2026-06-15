@@ -77,7 +77,7 @@
   label { display: block; font-family: var(--mono); font-size: 0.72rem; color: var(--muted); margin: 14px 0 6px; }
   input[type=text] {
     width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
-    font-size: 0.95rem; font-family: var(--body); background: var(--bg);
+    font-size: 1rem; font-family: var(--body); background: var(--bg);
   }
   input[type=text]:focus { outline: 2px solid var(--accent); border-color: transparent; }
   input[type=range] { width: 100%; accent-color: var(--accent); }
@@ -100,7 +100,7 @@
   }
   .camera-modal.open { display: flex; }
   .camera-box { background: var(--surface); border-radius: 10px; padding: 16px; max-width: 480px; width: 100%; }
-  .camera-box video { width: 100%; border-radius: 8px; background: #000; display: block; }
+  .camera-box video { width: 100%; max-height: 70vh; object-fit: cover; border-radius: 8px; background: #000; display: block; }
   .camera-actions { display: flex; gap: 8px; margin-top: 12px; }
   .camera-actions .btn { margin-top: 0; }
 
@@ -118,6 +118,7 @@
 
   .person-row {
     display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 8px;
     padding: 12px 4px; border-bottom: 1px solid var(--line);
   }
   .person-row b { font-weight: 600; }
@@ -134,6 +135,15 @@
   .msg.err { display: block; background: #F6E3D7; color: var(--nomatch); }
 
   .empty { color: var(--muted); font-size: 0.88rem; padding: 16px 0; }
+
+  @media (max-width: 480px) {
+    .wrap { padding: 18px 12px 48px; }
+    h1 { font-size: 1.4rem; }
+    header { margin-bottom: 16px; }
+    nav { gap: 0; }
+    nav button { flex: 1; padding: 10px 4px; font-size: 0.7rem; letter-spacing: 0.02em; }
+    .card { padding: 14px; }
+  }
 </style>
 </head>
 <body>
@@ -425,14 +435,22 @@ function openCamera(onCapture) {
   }
   cameraCallback = onCapture;
   $("#cameraModal").classList.add("open");
-  navigator.mediaDevices.getUserMedia({ video: true })
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } })
     .then((stream) => {
       cameraStream = stream;
       $("#cameraVideo").srcObject = stream;
     })
-    .catch((err) => {
-      alert("Tidak bisa mengakses kamera: " + err.message);
-      closeCamera();
+    .catch(() => {
+      // Fallback untuk perangkat tanpa kamera belakang (mis. laptop)
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then((stream) => {
+          cameraStream = stream;
+          $("#cameraVideo").srcObject = stream;
+        })
+        .catch((err) => {
+          alert("Tidak bisa mengakses kamera: " + err.message);
+          closeCamera();
+        });
     });
 }
 
