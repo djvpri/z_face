@@ -494,6 +494,7 @@ $("#regBtn").addEventListener("click", async () => {
 // ---------- Kamera ----------
 let cameraStream = null;
 let cameraCallback = null;
+let cameraLocation = null;
 
 function openCamera(onCapture) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -501,7 +502,17 @@ function openCamera(onCapture) {
     return;
   }
   cameraCallback = onCapture;
+  cameraLocation = null;
   $("#cameraModal").classList.add("open");
+
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { cameraLocation = pos.coords; },
+      () => { cameraLocation = null; },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+    );
+  }
+
   navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } })
     .then((stream) => {
       cameraStream = stream;
@@ -528,6 +539,29 @@ function closeCamera() {
     cameraStream = null;
   }
   cameraCallback = null;
+  cameraLocation = null;
+}
+
+// Tempel cap waktu & lokasi (jika izin diberikan) di pojok kiri bawah foto.
+function stampTimeAndLocation(ctx, canvas) {
+  const waktu = new Date().toLocaleString("id-ID", {
+    dateStyle: "medium", timeStyle: "medium",
+  });
+  let label = waktu;
+  if (cameraLocation) {
+    label += ` · ${cameraLocation.latitude.toFixed(5)}, ${cameraLocation.longitude.toFixed(5)}`;
+  }
+
+  const fontSize = Math.max(14, Math.round(canvas.width * 0.028));
+  const padding = Math.round(fontSize * 0.6);
+  ctx.font = `${fontSize}px "JetBrains Mono", monospace`;
+  const barHeight = fontSize + padding * 2;
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+  ctx.fillRect(0, canvas.height - barHeight, canvas.width, barHeight);
+  ctx.fillStyle = "#fff";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, padding, canvas.height - barHeight / 2);
 }
 
 $("#captureBtn").addEventListener("click", () => {
@@ -535,7 +569,9 @@ $("#captureBtn").addEventListener("click", () => {
   const canvas = $("#cameraCanvas");
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
-  canvas.getContext("2d").drawImage(video, 0, 0);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(video, 0, 0);
+  stampTimeAndLocation(ctx, canvas);
   canvas.toBlob((blob) => {
     const file = new File([blob], "kamera.jpg", { type: "image/jpeg" });
     const cb = cameraCallback;
