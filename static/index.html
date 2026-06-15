@@ -388,25 +388,6 @@ function renderResults(faces) {
   });
 }
 
-// Crop area wajah (dengan padding) dari foto asli agar bisa langsung
-// dikirim ke /api/register tanpa perlu unggah ulang.
-async function cropFace(file, bbox, meta, padRatio = 0.4) {
-  const bitmap = await createImageBitmap(file);
-  const padX = (bbox.x2 - bbox.x1) * padRatio;
-  const padY = (bbox.y2 - bbox.y1) * padRatio;
-  const x1 = Math.max(0, bbox.x1 - padX);
-  const y1 = Math.max(0, bbox.y1 - padY);
-  const x2 = Math.min(meta.width, bbox.x2 + padX);
-  const y2 = Math.min(meta.height, bbox.y2 + padY);
-  const canvas = document.createElement("canvas");
-  canvas.width = x2 - x1;
-  canvas.height = y2 - y1;
-  canvas.getContext("2d").drawImage(bitmap, x1, y1, canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
-  return new File([blob], "wajah.jpg", { type: "image/jpeg" });
-}
-
 async function registerFaceFromResult(idx) {
   const card = $("#face-card-" + idx);
   const nameInput = card.querySelector(".quick-reg-name");
@@ -425,11 +406,11 @@ async function registerFaceFromResult(idx) {
   msg.className = "quick-reg-msg";
 
   try {
-    const cropped = await cropFace(idFileObj, lastFaces[idx].bbox, lastImageMeta);
-    const fd = new FormData();
-    fd.append("name", name);
-    fd.append("file", cropped);
-    const r = await fetch("/api/register", { method: "POST", body: fd });
+    const r = await fetch("/api/register-embedding", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, embedding: lastFaces[idx].embedding }),
+    });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || "Gagal mendaftarkan");
 

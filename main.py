@@ -13,6 +13,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from supabase import create_client
 
 load_dotenv()
@@ -127,6 +128,31 @@ async def register_face(name: str = Form(...), file: UploadFile = File(...)):
     }
 
 
+class EmbeddingRegisterRequest(BaseModel):
+    name: str
+    embedding: list[float]
+
+
+@app.post("/api/register-embedding")
+def register_embedding(body: EmbeddingRegisterRequest):
+    """Daftarkan wajah dari embedding yang sudah dihitung sebelumnya
+    (misalnya hasil dari /api/identify), tanpa deteksi ulang."""
+    require_db()
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nama tidak boleh kosong")
+    if len(body.embedding) != 512:
+        raise HTTPException(status_code=400, detail="Embedding tidak valid")
+
+    res = (
+        supabase.table("faces")
+        .insert({"name": name, "embedding": body.embedding})
+        .execute()
+    )
+
+    return {"id": res.data[0]["id"], "name": name}
+
+
 @app.post("/api/identify")
 async def identify(file: UploadFile = File(...), threshold: float = Form(0.40)):
     """Identifikasi semua wajah dalam foto.
@@ -160,6 +186,7 @@ async def identify(file: UploadFile = File(...), threshold: float = Form(0.40)):
                 "det_score": round(float(face.det_score), 3),
                 "matches": matches,
                 "best": matches[0] if matches else None,
+                "embedding": embedding,
             }
         )
 
