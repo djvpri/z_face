@@ -89,6 +89,13 @@
   input[type=text]:focus { outline: 2px solid var(--accent); border-color: transparent; }
   input[type=range] { width: 100%; accent-color: var(--accent); }
 
+  select {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+    font-size: 0.8rem; font-family: var(--mono); background: var(--surface); color: var(--ink);
+    margin: 10px 0;
+  }
+  select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
   .btn {
     margin-top: 16px; width: 100%; padding: 12px; border: none; border-radius: 8px;
     background: var(--accent); color: #fff; font-family: var(--mono); font-size: 0.85rem;
@@ -274,6 +281,7 @@
           <video id="rtVideo" autoplay playsinline muted></video>
           <canvas id="rtCanvas"></canvas>
         </div>
+        <select id="rtCameraSelect" hidden></select>
         <label>Threshold kemiripan: <span id="rtThVal">0.40</span></label>
         <input type="range" id="rtThreshold" min="0.30" max="0.60" step="0.01" value="0.40">
         <button class="btn" id="rtStartBtn" type="button">MULAI KAMERA</button>
@@ -300,6 +308,7 @@
             <div class="guest-greeting-sub"></div>
           </div>
         </div>
+        <select id="guestCameraSelect" hidden></select>
         <button class="btn" id="guestStartBtn" type="button">MULAI MODE TAMU</button>
         <button class="btn secondary" id="guestStopBtn" type="button" hidden>HENTIKAN</button>
         <div class="msg" id="guestMsg"></div>
@@ -341,6 +350,7 @@
   <div class="camera-box">
     <video id="cameraVideo" autoplay playsinline muted></video>
     <canvas id="cameraCanvas" hidden></canvas>
+    <select id="cameraSelect" hidden></select>
     <div class="camera-actions">
       <button class="btn" id="captureBtn" type="button">AMBIL FOTO</button>
       <button class="btn secondary" id="closeCameraBtn" type="button">TUTUP</button>
@@ -696,6 +706,42 @@ $("#regBtn").addEventListener("click", async () => {
   }
 });
 
+// ---------- Pemilihan kamera ----------
+// Daftar kamera baru muncul dengan label setelah izin kamera diberikan,
+// jadi enumerateDevices() dipanggil setelah getUserMedia() berhasil.
+async function listCameras() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return devices.filter((d) => d.kind === "videoinput");
+  } catch {
+    return [];
+  }
+}
+
+async function populateCameraSelect(selectEl, activeDeviceId) {
+  const cams = await listCameras();
+  if (cams.length <= 1) {
+    selectEl.hidden = true;
+    selectEl.innerHTML = "";
+    return;
+  }
+  selectEl.innerHTML = cams.map((c, i) =>
+    `<option value="${c.deviceId}">${c.label || "Kamera " + (i + 1)}</option>`
+  ).join("");
+  if (activeDeviceId) selectEl.value = activeDeviceId;
+  selectEl.hidden = false;
+}
+
+async function getCameraStream(deviceId) {
+  if (deviceId) {
+    return navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } } });
+  }
+  // Default: coba kamera belakang dulu, fallback ke kamera apa pun (mis. laptop)
+  return navigator.mediaDevices
+    .getUserMedia({ video: { facingMode: { ideal: "environment" } } })
+    .catch(() => navigator.mediaDevices.getUserMedia({ video: true }));
+}
+
 // ---------- Kamera ----------
 let cameraStream = null;
 let cameraCallback = null;
@@ -718,24 +764,29 @@ function openCamera(onCapture) {
     );
   }
 
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } })
+  getCameraStream()
     .then((stream) => {
       cameraStream = stream;
       $("#cameraVideo").srcObject = stream;
+      const deviceId = stream.getVideoTracks()[0].getSettings().deviceId;
+      populateCameraSelect($("#cameraSelect"), deviceId);
     })
-    .catch(() => {
-      // Fallback untuk perangkat tanpa kamera belakang (mis. laptop)
-      navigator.mediaDevices.getUserMedia({ video: true })
-        .then((stream) => {
-          cameraStream = stream;
-          $("#cameraVideo").srcObject = stream;
-        })
-        .catch((err) => {
-          alert("Tidak bisa mengakses kamera: " + err.message);
-          closeCamera();
-        });
+    .catch((err) => {
+      alert("Tidak bisa mengakses kamera: " + err.message);
+      closeCamera();
     });
 }
+
+$("#cameraSelect").addEventListener("change", async () => {
+  try {
+    const stream = await getCameraStream($("#cameraSelect").value);
+    if (cameraStream) cameraStream.getTracks().forEach((t) => t.stop());
+    cameraStream = stream;
+    $("#cameraVideo").srcObject = stream;
+  } catch (err) {
+    alert("Tidak bisa beralih kamera: " + err.message);
+  }
+});
 
 function closeCamera() {
   $("#cameraModal").classList.remove("open");
@@ -745,6 +796,7 @@ function closeCamera() {
   }
   cameraCallback = null;
   cameraLocation = null;
+  $("#cameraSelect").hidden = true;
 }
 
 // Tempel cap waktu & lokasi (jika izin diberikan) di pojok kiri bawah foto.
@@ -803,15 +855,15 @@ async function startRealtime() {
   $("#rtMsg").className = "msg";
 
   try {
-    rtStream = await navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: { ideal: "environment" } } })
-      .catch(() => navigator.mediaDevices.getUserMedia({ video: true }));
+    rtStream = await getCameraStream();
   } catch (err) {
     showMsg($("#rtMsg"), "Tidak bisa mengakses kamera: " + err.message, "err");
     return;
   }
 
   $("#rtVideo").srcObject = rtStream;
+  const deviceId = rtStream.getVideoTracks()[0].getSettings().deviceId;
+  populateCameraSelect($("#rtCameraSelect"), deviceId);
   $("#rtStartBtn").hidden = true;
   $("#rtStopBtn").hidden = false;
   $("#rtStatus").textContent = "Live · mendeteksi…";
@@ -821,11 +873,23 @@ async function startRealtime() {
   rtInterval = setInterval(captureAndIdentify, 1500);
 }
 
+$("#rtCameraSelect").addEventListener("change", async () => {
+  try {
+    const stream = await getCameraStream($("#rtCameraSelect").value);
+    if (rtStream) rtStream.getTracks().forEach((t) => t.stop());
+    rtStream = stream;
+    $("#rtVideo").srcObject = stream;
+  } catch (err) {
+    showMsg($("#rtMsg"), "Tidak bisa beralih kamera: " + err.message, "err");
+  }
+});
+
 function stopRealtime() {
   if (rtInterval) { clearInterval(rtInterval); rtInterval = null; }
   if (rtStream) { rtStream.getTracks().forEach((t) => t.stop()); rtStream = null; }
   rtBusy = false;
   $("#rtVideo").srcObject = null;
+  $("#rtCameraSelect").hidden = true;
   $("#rtStartBtn").hidden = false;
   $("#rtStopBtn").hidden = true;
   $("#rtStatus").textContent = "Kamera belum aktif.";
@@ -933,15 +997,15 @@ async function startGuest() {
   $("#guestMsg").className = "msg";
 
   try {
-    guestStream = await navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: { ideal: "environment" } } })
-      .catch(() => navigator.mediaDevices.getUserMedia({ video: true }));
+    guestStream = await getCameraStream();
   } catch (err) {
     showMsg($("#guestMsg"), "Tidak bisa mengakses kamera: " + err.message, "err");
     return;
   }
 
   $("#guestVideo").srcObject = guestStream;
+  const deviceId = guestStream.getVideoTracks()[0].getSettings().deviceId;
+  populateCameraSelect($("#guestCameraSelect"), deviceId);
   $("#guestStartBtn").hidden = true;
   $("#guestStopBtn").hidden = false;
   resetGuestGreeting();
@@ -949,11 +1013,23 @@ async function startGuest() {
   guestInterval = setInterval(captureGuest, 1500);
 }
 
+$("#guestCameraSelect").addEventListener("change", async () => {
+  try {
+    const stream = await getCameraStream($("#guestCameraSelect").value);
+    if (guestStream) guestStream.getTracks().forEach((t) => t.stop());
+    guestStream = stream;
+    $("#guestVideo").srcObject = stream;
+  } catch (err) {
+    showMsg($("#guestMsg"), "Tidak bisa beralih kamera: " + err.message, "err");
+  }
+});
+
 function stopGuest() {
   if (guestInterval) { clearInterval(guestInterval); guestInterval = null; }
   if (guestStream) { guestStream.getTracks().forEach((t) => t.stop()); guestStream = null; }
   guestBusy = false;
   $("#guestVideo").srcObject = null;
+  $("#guestCameraSelect").hidden = true;
   $("#guestStartBtn").hidden = false;
   $("#guestStopBtn").hidden = true;
   resetGuestGreeting();
