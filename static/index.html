@@ -156,6 +156,16 @@
   }
   .person-row button:hover { border-color: var(--nomatch); }
 
+  .log-row {
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 8px;
+    padding: 10px 4px; border-bottom: 1px solid var(--line);
+    font-size: 0.85rem;
+  }
+  .log-row .log-name { font-weight: 600; }
+  .log-row .log-name.unknown { color: var(--nomatch); }
+  .log-row .log-meta { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); }
+
   .msg { margin-top: 12px; font-size: 0.85rem; padding: 10px 12px; border-radius: 8px; display: none; }
   .msg.ok { display: block; background: var(--accent-soft); color: var(--accent); }
   .msg.err { display: block; background: #F6E3D7; color: var(--nomatch); }
@@ -183,6 +193,7 @@
     <button class="active" data-tab="identify">IDENTIFIKASI</button>
     <button data-tab="register">DAFTARKAN</button>
     <button data-tab="realtime">REALTIME</button>
+    <button data-tab="logs">RIWAYAT</button>
     <button data-tab="db">DATABASE</button>
   </nav>
 
@@ -261,6 +272,15 @@
     </div>
   </section>
 
+  <!-- ============ RIWAYAT ============ -->
+  <section class="panel" id="panel-logs">
+    <div class="card">
+      <div class="eyebrow">Riwayat deteksi</div>
+      <button class="btn secondary" id="logsRefreshBtn" type="button">MUAT ULANG</button>
+      <div id="logsList"><div class="empty">Memuat…</div></div>
+    </div>
+  </section>
+
   <!-- ============ DATABASE ============ -->
   <section class="panel" id="panel-db">
     <div class="card">
@@ -292,6 +312,7 @@ document.querySelectorAll("nav button").forEach((b) => {
     b.classList.add("active");
     $("#panel-" + b.dataset.tab).classList.add("active");
     if (b.dataset.tab === "db") loadPeople();
+    if (b.dataset.tab === "logs") loadLogs();
     if (b.dataset.tab !== "realtime") stopRealtime();
   });
 });
@@ -380,6 +401,7 @@ $("#idBtn").addEventListener("click", async () => {
     lastFaces = d.faces;
     renderResults(d.faces);
     drawBoxes(d.faces);
+    logFaces(d.faces, "identify");
   } catch (err) {
     showMsg($("#idMsg"), err.message, "err");
   } finally {
@@ -460,6 +482,52 @@ async function registerFaceFromResult(idx) {
     btn.textContent = "DAFTARKAN";
   }
 }
+
+// ---------- Riwayat ----------
+function logFaces(faces, source) {
+  faces.forEach((f) => {
+    fetch("/api/logs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: f.best ? f.best.name : null,
+        similarity: f.best ? f.best.similarity : null,
+        det_score: f.det_score,
+        source,
+      }),
+    }).catch(() => {});
+  });
+}
+
+async function loadLogs() {
+  const box = $("#logsList");
+  box.innerHTML = '<div class="empty">Memuat…</div>';
+  try {
+    const r = await fetch("/api/logs");
+    const d = await r.json();
+    if (!d.logs.length) {
+      box.innerHTML = '<div class="empty">Belum ada riwayat deteksi.</div>';
+      return;
+    }
+    box.innerHTML = d.logs.map((l) => {
+      const waktu = new Date(l.created_at).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "medium" });
+      const known = !!l.name;
+      const nama = known ? l.name : "Tidak dikenal";
+      const pct = l.similarity != null ? `${(l.similarity * 100).toFixed(1)}%` : "-";
+      const sumber = l.source === "realtime" ? "Realtime" : "Identifikasi";
+      return `<div class="log-row">
+        <div>
+          <span class="log-name${known ? "" : " unknown"}">${nama}</span>
+          <div class="log-meta">${waktu} · ${sumber} · kemiripan ${pct}</div>
+        </div>
+      </div>`;
+    }).join("");
+  } catch {
+    box.innerHTML = '<div class="empty">Gagal memuat riwayat.</div>';
+  }
+}
+
+$("#logsRefreshBtn").addEventListener("click", loadLogs);
 
 function drawBoxes(faces) {
   const img = $("#idImg");
@@ -621,6 +689,19 @@ let rtStream = null;
 let rtInterval = null;
 let rtBusy = false;
 let rtImageMeta = null;
+const rtLastLogged = new Map();
+const RT_LOG_COOLDOWN = 30000; // jeda 30 detik per orang/identitas agar riwayat tidak penuh
+
+function logRealtimeFaces(faces) {
+  const now = Date.now();
+  faces.forEach((f) => {
+    const key = f.best ? f.best.name : "__unknown__";
+    const last = rtLastLogged.get(key) || 0;
+    if (now - last < RT_LOG_COOLDOWN) return;
+    rtLastLogged.set(key, now);
+    logFaces([f], "realtime");
+  });
+}
 
 $("#rtThreshold").addEventListener("input", (e) => { $("#rtThVal").textContent = e.target.value; });
 
@@ -688,6 +769,7 @@ async function captureAndIdentify() {
     rtImageMeta = d.image;
     drawRtBoxes(d.faces);
     renderRtResults(d.faces);
+    logRealtimeFaces(d.faces);
     $("#rtMsg").className = "msg";
   } catch (err) {
     showMsg($("#rtMsg"), err.message, "err");

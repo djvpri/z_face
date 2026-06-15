@@ -193,6 +193,47 @@ async def identify(file: UploadFile = File(...), threshold: float = Form(0.40)):
     return {"image": {"width": w, "height": h}, "faces": results}
 
 
+class LogEntryRequest(BaseModel):
+    name: str | None = None
+    similarity: float | None = None
+    det_score: float | None = None
+    source: str
+
+
+@app.post("/api/logs")
+def create_log(body: LogEntryRequest):
+    """Catat satu hasil deteksi (dikenal maupun tidak dikenal) ke riwayat."""
+    require_db()
+    if body.source not in ("identify", "realtime"):
+        raise HTTPException(status_code=400, detail="Source tidak valid")
+
+    supabase.table("detection_logs").insert(
+        {
+            "name": body.name,
+            "similarity": body.similarity,
+            "det_score": body.det_score,
+            "source": body.source,
+        }
+    ).execute()
+
+    return {"ok": True}
+
+
+@app.get("/api/logs")
+def list_logs(limit: int = 50):
+    """Riwayat deteksi terbaru, urut dari yang paling baru."""
+    require_db()
+    limit = max(1, min(limit, 200))
+    res = (
+        supabase.table("detection_logs")
+        .select("id, name, similarity, det_score, source, created_at")
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return {"logs": res.data}
+
+
 @app.get("/api/people")
 def list_people():
     """Daftar orang terdaftar, dikelompokkan per nama."""
