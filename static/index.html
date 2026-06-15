@@ -290,18 +290,32 @@
 
   <!-- ============ TAMU ============ -->
   <section class="panel" id="panel-guest">
-    <div class="card">
-      <div class="eyebrow">Mode penerima tamu</div>
-      <div class="guest-stage">
-        <video id="guestVideo" autoplay playsinline muted></video>
-        <div class="guest-greeting" id="guestGreeting">
-          <div class="guest-greeting-text">Arahkan wajah ke kamera</div>
-          <div class="guest-greeting-sub"></div>
+    <div class="grid">
+      <div class="card">
+        <div class="eyebrow">Mode penerima tamu</div>
+        <div class="guest-stage">
+          <video id="guestVideo" autoplay playsinline muted></video>
+          <div class="guest-greeting" id="guestGreeting">
+            <div class="guest-greeting-text">Arahkan wajah ke kamera</div>
+            <div class="guest-greeting-sub"></div>
+          </div>
         </div>
+        <button class="btn" id="guestStartBtn" type="button">MULAI MODE TAMU</button>
+        <button class="btn secondary" id="guestStopBtn" type="button" hidden>HENTIKAN</button>
+        <div class="msg" id="guestMsg"></div>
       </div>
-      <button class="btn" id="guestStartBtn" type="button">MULAI MODE TAMU</button>
-      <button class="btn secondary" id="guestStopBtn" type="button" hidden>HENTIKAN</button>
-      <div class="msg" id="guestMsg"></div>
+      <div class="card">
+        <div class="eyebrow">Kalimat sapaan</div>
+        <label>Wajah dikenal (gunakan <code>{nama}</code> untuk nama)</label>
+        <input type="text" id="greetingKnown" placeholder="Selamat datang, {nama}!">
+        <label>Wajah tidak dikenal</label>
+        <input type="text" id="greetingUnknown" placeholder="Halo! Wajah belum terdaftar">
+        <button class="btn secondary" id="greetingSaveBtn" type="button">SIMPAN SAPAAN</button>
+        <div class="msg" id="greetingMsg"></div>
+        <p style="font-size:.8rem; color:var(--muted); margin-top:10px; line-height:1.6;">
+          Sapaan ini tersimpan di server sehingga berlaku sama di semua perangkat yang membuka mode TAMU.
+        </p>
+      </div>
     </div>
   </section>
 
@@ -355,6 +369,47 @@ document.querySelectorAll("nav button").forEach((b) => {
 fetch("/api/health").then((r) => r.json()).then((d) => {
   $("#health").innerHTML = `model <b>${d.model}</b> · database <b>${d.database}</b>`;
 }).catch(() => { $("#health").textContent = "server tidak terjangkau"; });
+
+// ---------- Pengaturan sapaan ----------
+let greetingTemplates = {
+  greeting_known: "Selamat datang, {nama}!",
+  greeting_unknown: "Halo! Wajah belum terdaftar",
+};
+
+async function loadGreetingSettings() {
+  try {
+    const r = await fetch("/api/settings");
+    const d = await r.json();
+    greetingTemplates = { ...greetingTemplates, ...d };
+    $("#greetingKnown").value = greetingTemplates.greeting_known;
+    $("#greetingUnknown").value = greetingTemplates.greeting_unknown;
+  } catch {}
+}
+loadGreetingSettings();
+
+$("#greetingSaveBtn").addEventListener("click", async () => {
+  const btn = $("#greetingSaveBtn");
+  btn.disabled = true; btn.textContent = "MENYIMPAN…";
+  try {
+    const body = {
+      greeting_known: $("#greetingKnown").value.trim() || greetingTemplates.greeting_known,
+      greeting_unknown: $("#greetingUnknown").value.trim() || greetingTemplates.greeting_unknown,
+    };
+    const r = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Gagal menyimpan");
+    greetingTemplates = d;
+    showMsg($("#greetingMsg"), "Sapaan tersimpan untuk semua perangkat.", "ok");
+  } catch (err) {
+    showMsg($("#greetingMsg"), err.message, "err");
+  } finally {
+    btn.disabled = false; btn.textContent = "SIMPAN SAPAAN";
+  }
+});
 
 // ---------- Dropzone helper ----------
 function setupDrop(dropEl, inputEl, onFile) {
@@ -960,11 +1015,11 @@ function updateGuestGreeting(faces) {
 
   if (main.best) {
     el.className = "guest-greeting known";
-    text.textContent = `Selamat datang, ${main.best.name}!`;
+    text.textContent = greetingTemplates.greeting_known.replaceAll("{nama}", main.best.name);
     sub.textContent = `kemiripan ${(main.best.similarity * 100).toFixed(1)}%`;
   } else {
     el.className = "guest-greeting unknown";
-    text.textContent = "Halo! Wajah belum terdaftar";
+    text.textContent = greetingTemplates.greeting_unknown;
     sub.textContent = "Silakan hubungi resepsionis untuk pendaftaran";
   }
 }

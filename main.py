@@ -234,6 +234,40 @@ def list_logs(limit: int = 50):
     return {"logs": res.data}
 
 
+DEFAULT_SETTINGS = {
+    "greeting_known": "Selamat datang, {nama}!",
+    "greeting_unknown": "Halo! Wajah belum terdaftar",
+}
+
+
+class SettingsRequest(BaseModel):
+    greeting_known: str | None = None
+    greeting_unknown: str | None = None
+
+
+@app.get("/api/settings")
+def get_settings():
+    """Ambil pengaturan aplikasi (mis. kalimat sapaan mode TAMU)."""
+    require_db()
+    res = supabase.table("app_settings").select("key, value").execute()
+    settings = dict(DEFAULT_SETTINGS)
+    for row in res.data:
+        if row["key"] in settings:
+            settings[row["key"]] = row["value"]
+    return settings
+
+
+@app.put("/api/settings")
+def update_settings(body: SettingsRequest):
+    """Perbarui pengaturan aplikasi. Hanya field yang dikirim yang diubah,
+    dan tersimpan di server sehingga berlaku sama di semua perangkat."""
+    require_db()
+    updates = body.model_dump(exclude_none=True)
+    for key, value in updates.items():
+        supabase.table("app_settings").upsert({"key": key, "value": value}).execute()
+    return get_settings()
+
+
 @app.get("/api/people")
 def list_people():
     """Daftar orang terdaftar, dikelompokkan per nama."""
