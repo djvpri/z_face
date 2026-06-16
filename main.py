@@ -334,6 +334,7 @@ class LogEntryRequest(BaseModel):
     similarity: float | None = None
     det_score: float | None = None
     source: str
+    embedding: list[float] | None = None
 
 
 @app.post("/api/logs")
@@ -342,13 +343,16 @@ def create_log(body: LogEntryRequest, session: dict = Depends(get_session)):
     require_db()
     if body.source not in ("identify", "realtime", "guest"):
         raise HTTPException(status_code=400, detail="Source tidak valid")
-    supabase.table("detection_logs").insert({
+    row: dict = {
         "name": body.name,
         "similarity": body.similarity,
         "det_score": body.det_score,
         "source": body.source,
         "org_id": session["org_id"],
-    }).execute()
+    }
+    if body.name is None and body.embedding and len(body.embedding) == 512:
+        row["embedding"] = body.embedding
+    supabase.table("detection_logs").insert(row).execute()
     return {"ok": True}
 
 
@@ -359,7 +363,7 @@ def list_logs(limit: int = 50, session: dict = Depends(get_session)):
     limit = max(1, min(limit, 200))
     res = (
         supabase.table("detection_logs")
-        .select("id, name, similarity, det_score, source, created_at")
+        .select("id, name, similarity, det_score, source, created_at, embedding")
         .eq("org_id", session["org_id"])
         .order("created_at", desc=True)
         .limit(limit)

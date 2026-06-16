@@ -721,6 +721,7 @@ function logFaces(faces, source) {
         similarity: f.best ? f.best.similarity : null,
         det_score: f.det_score,
         source,
+        embedding: !f.best && f.embedding ? f.embedding : undefined,
       }),
     }).catch(() => {});
   });
@@ -740,6 +741,8 @@ function logDetections(faces, source) {
   });
 }
 
+const logEmbeddings = new Map();
+
 async function loadLogs() {
   const box = $("#logsList");
   box.innerHTML = '<div class="empty">Memuat…</div>';
@@ -750,21 +753,65 @@ async function loadLogs() {
       box.innerHTML = '<div class="empty">Belum ada riwayat deteksi.</div>';
       return;
     }
+    logEmbeddings.clear();
     box.innerHTML = d.logs.map((l) => {
       const waktu = new Date(l.created_at).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "medium" });
       const known = !!l.name;
       const nama = known ? l.name : "Tidak dikenal";
       const pct = l.similarity != null ? `${(l.similarity * 100).toFixed(1)}%` : "-";
       const sumber = l.source === "realtime" ? "Realtime" : l.source === "guest" ? "Tamu" : "Identifikasi";
+      if (!known && l.embedding) logEmbeddings.set(l.id, l.embedding);
+      const regPart = !known && l.embedding ? `
+        <div class="quick-reg">
+          <input type="text" class="quick-reg-name" placeholder="Nama orang ini">
+          <button class="btn secondary log-reg-btn" data-id="${l.id}" type="button">DAFTARKAN</button>
+        </div>
+        <div class="quick-reg-msg"></div>` : "";
       return `<div class="log-row">
-        <div>
+        <div style="width:100%">
           <span class="log-name${known ? "" : " unknown"}">${nama}</span>
           <div class="log-meta">${waktu} · ${sumber} · kemiripan ${pct}</div>
+          ${regPart}
         </div>
       </div>`;
     }).join("");
+    box.querySelectorAll(".log-reg-btn").forEach((btn) => {
+      btn.addEventListener("click", () => registerFaceFromLog(btn));
+    });
   } catch {
     box.innerHTML = '<div class="empty">Gagal memuat riwayat.</div>';
+  }
+}
+
+async function registerFaceFromLog(btn) {
+  const row = btn.closest(".log-row");
+  const nameInput = row.querySelector(".quick-reg-name");
+  const msg = row.querySelector(".quick-reg-msg");
+  const name = nameInput.value.trim();
+  if (!name) { msg.textContent = "Isi nama dulu"; msg.className = "quick-reg-msg err"; return; }
+  const embedding = logEmbeddings.get(btn.dataset.id);
+  if (!embedding) { msg.textContent = "Data embedding tidak tersedia"; msg.className = "quick-reg-msg err"; return; }
+  btn.disabled = true; nameInput.disabled = true;
+  btn.textContent = "MENYIMPAN…";
+  msg.textContent = ""; msg.className = "quick-reg-msg";
+  try {
+    const r = await apiFetch("/api/register-embedding", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, embedding }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Gagal mendaftarkan");
+    msg.textContent = `${name} berhasil didaftarkan.`;
+    msg.className = "quick-reg-msg ok";
+    row.querySelector(".log-name").textContent = name;
+    row.querySelector(".log-name").classList.remove("unknown");
+    row.querySelector(".quick-reg").remove();
+  } catch (err) {
+    msg.textContent = err.message;
+    msg.className = "quick-reg-msg err";
+    btn.disabled = false; nameInput.disabled = false;
+    btn.textContent = "DAFTARKAN";
   }
 }
 
