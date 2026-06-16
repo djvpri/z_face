@@ -1,5 +1,5 @@
 """
-Face ID API — Identifikasi orang dari foto
+ZFace API — Identifikasi orang dari foto
 Stack: FastAPI + InsightFace (buffalo_l) + Supabase pgvector
 Jalankan: uvicorn main:app --reload
 """
@@ -34,7 +34,7 @@ face_engine = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
 face_engine.prepare(ctx_id=0, det_size=(640, 640))
 print("Model siap.")
 
-app = FastAPI(title="Face ID API", version="1.0.0")
+app = FastAPI(title="ZFace API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
