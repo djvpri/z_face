@@ -217,13 +217,50 @@
     nav button { flex: 1; padding: 10px 4px; font-size: 0.7rem; letter-spacing: 0.02em; }
     .card { padding: 14px; }
   }
+
+  /* Login overlay */
+  #loginOverlay {
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(14,25,35,0.93);
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  #loginOverlay.hidden { display: none; }
+  .login-box {
+    background: var(--surface); border-radius: 16px; padding: 40px 36px;
+    width: 100%; max-width: 380px;
+    box-shadow: 0 8px 48px rgba(0,0,0,0.45);
+  }
+  .login-box h2 { font-family: var(--display); font-size: 1.6rem; font-weight: 700; margin-bottom: 6px; }
+  .login-box .sub { color: var(--muted); font-size: 0.85rem; margin-bottom: 28px; }
+  .login-box label { display: block; font-size: 0.78rem; font-weight: 600; margin-bottom: 5px; color: var(--muted); letter-spacing: 0.04em; }
+  .login-box input { margin-bottom: 16px; }
+  .login-box .msg { margin-top: 4px; margin-bottom: 0; }
 </style>
 </head>
 <body>
+
+<div id="loginOverlay">
+  <div class="login-box">
+    <h2>Z<span style="color:var(--accent)">Face</span></h2>
+    <p class="sub">Silakan masuk untuk melanjutkan</p>
+    <label for="loginEmail">EMAIL</label>
+    <input type="email" id="loginEmail" placeholder="email@perusahaan.com" autocomplete="username">
+    <label for="loginPassword">PASSWORD</label>
+    <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
+    <button class="btn" id="loginBtn" type="button">MASUK</button>
+    <div class="msg" id="loginMsg"></div>
+  </div>
+</div>
+
 <div class="wrap">
   <header>
     <h1>Z<span>Face</span></h1>
-    <div id="health">memeriksa server…</div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <span id="orgBadge" style="font-family:var(--mono);font-size:0.72rem;color:var(--muted);"></span>
+      <div id="health">memeriksa server…</div>
+      <button id="logoutBtn" class="btn secondary" type="button" style="padding:6px 14px;font-size:0.7rem;width:auto;">KELUAR</button>
+    </div>
   </header>
 
   <nav>
@@ -376,6 +413,76 @@
 <script>
 const $ = (s) => document.querySelector(s);
 
+// ---------- Auth ----------
+function apiFetch(url, opts = {}) {
+  const token = localStorage.getItem("zface_token") || "";
+  const headers = Object.assign({ "Authorization": "Bearer " + token }, opts.headers || {});
+  return fetch(url, Object.assign({}, opts, { headers })).then((r) => {
+    if (r.status === 401) { showLogin(); throw new Error("Sesi berakhir, silakan login kembali"); }
+    return r;
+  });
+}
+
+function showLogin() {
+  $("#loginOverlay").classList.remove("hidden");
+}
+
+function hideLogin() {
+  $("#loginOverlay").classList.add("hidden");
+}
+
+function logout() {
+  localStorage.removeItem("zface_token");
+  $("#orgBadge").textContent = "";
+  showLogin();
+}
+
+async function initAuth() {
+  const token = localStorage.getItem("zface_token");
+  if (!token) { showLogin(); return; }
+  try {
+    const r = await fetch("/api/auth/me", { headers: { "Authorization": "Bearer " + token } });
+    if (!r.ok) { showLogin(); return; }
+    const me = await r.json();
+    $("#orgBadge").textContent = me.org_name;
+    hideLogin();
+    loadGreetingSettings();
+  } catch { showLogin(); }
+}
+
+$("#loginBtn").addEventListener("click", async () => {
+  const btn = $("#loginBtn");
+  const msg = $("#loginMsg");
+  const email = $("#loginEmail").value.trim();
+  const password = $("#loginPassword").value;
+  msg.className = "msg";
+  if (!email || !password) {
+    msg.className = "msg err"; msg.textContent = "Email dan password wajib diisi"; return;
+  }
+  btn.disabled = true; btn.textContent = "MASUK…";
+  try {
+    const r = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.className = "msg err"; msg.textContent = d.detail || "Login gagal"; return; }
+    localStorage.setItem("zface_token", d.access_token);
+    hideLogin();
+    initAuth();
+  } catch { msg.className = "msg err"; msg.textContent = "Tidak dapat terhubung ke server"; }
+  finally { btn.disabled = false; btn.textContent = "MASUK"; }
+});
+
+$("#loginPassword").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") $("#loginBtn").click();
+});
+
+$("#logoutBtn").addEventListener("click", logout);
+
+initAuth();
+
 // ---------- Tabs ----------
 document.querySelectorAll("nav button").forEach((b) => {
   b.addEventListener("click", () => {
@@ -409,7 +516,7 @@ let greetingTemplates = {
 
 async function loadGreetingSettings() {
   try {
-    const r = await fetch("/api/settings");
+    const r = await apiFetch("/api/settings");
     const d = await r.json();
     greetingTemplates = { ...greetingTemplates, ...d };
     $("#greetingKnown").value = greetingTemplates.greeting_known;
@@ -426,7 +533,7 @@ $("#greetingSaveBtn").addEventListener("click", async () => {
       greeting_known: $("#greetingKnown").value.trim() || greetingTemplates.greeting_known,
       greeting_unknown: $("#greetingUnknown").value.trim() || greetingTemplates.greeting_unknown,
     };
-    const r = await fetch("/api/settings", {
+    const r = await apiFetch("/api/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -514,7 +621,7 @@ $("#idBtn").addEventListener("click", async () => {
   fd.append("threshold", $("#threshold").value);
 
   try {
-    const r = await fetch("/api/identify", { method: "POST", body: fd });
+    const r = await apiFetch("/api/identify", { method: "POST", body: fd });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || "Gagal memproses");
     lastImageMeta = d.image;
@@ -582,7 +689,7 @@ async function registerFaceFromResult(idx) {
   msg.className = "quick-reg-msg";
 
   try {
-    const r = await fetch("/api/register-embedding", {
+    const r = await apiFetch("/api/register-embedding", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, embedding: lastFaces[idx].embedding }),
@@ -606,7 +713,7 @@ async function registerFaceFromResult(idx) {
 // ---------- Riwayat ----------
 function logFaces(faces, source) {
   faces.forEach((f) => {
-    fetch("/api/logs", {
+    apiFetch("/api/logs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -637,7 +744,7 @@ async function loadLogs() {
   const box = $("#logsList");
   box.innerHTML = '<div class="empty">Memuat…</div>';
   try {
-    const r = await fetch("/api/logs");
+    const r = await apiFetch("/api/logs");
     const d = await r.json();
     if (!d.logs.length) {
       box.innerHTML = '<div class="empty">Belum ada riwayat deteksi.</div>';
@@ -713,7 +820,7 @@ $("#regBtn").addEventListener("click", async () => {
   fd.append("name", name);
   fd.append("file", regFileObj);
   try {
-    const r = await fetch("/api/register", { method: "POST", body: fd });
+    const r = await apiFetch("/api/register", { method: "POST", body: fd });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || "Gagal mendaftarkan");
     showMsg($("#regMsg"), `${d.name} berhasil didaftarkan.` + (d.note ? " " + d.note + "." : ""), "ok");
@@ -937,7 +1044,7 @@ async function captureAndIdentify() {
     fd.append("file", new File([blob], "live.jpg", { type: "image/jpeg" }));
     fd.append("threshold", $("#rtThreshold").value);
 
-    const r = await fetch("/api/identify", { method: "POST", body: fd });
+    const r = await apiFetch("/api/identify", { method: "POST", body: fd });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || "Gagal memproses");
 
@@ -1032,7 +1139,7 @@ async function startGuest() {
   $("#guestMsg").className = "msg";
   // Muat/perbarui cache gelar sebelum mode dimulai
   try {
-    const r = await fetch("/api/people");
+    const r = await apiFetch("/api/people");
     const d = await r.json();
     peopleCache = {};
     d.people.forEach((p) => { peopleCache[p.name] = p.title || ""; });
@@ -1103,7 +1210,7 @@ async function captureGuest() {
     fd.append("file", new File([blob], "guest.jpg", { type: "image/jpeg" }));
     fd.append("threshold", "0.40");
 
-    const r = await fetch("/api/identify", { method: "POST", body: fd });
+    const r = await apiFetch("/api/identify", { method: "POST", body: fd });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || "Gagal memproses");
 
@@ -1166,7 +1273,7 @@ async function loadPeople() {
   const box = $("#peopleList");
   box.innerHTML = '<div class="empty">Memuat…</div>';
   try {
-    const r = await fetch("/api/people");
+    const r = await apiFetch("/api/people");
     const d = await r.json();
     if (!d.people.length) {
       box.innerHTML = '<div class="empty">Belum ada wajah terdaftar. Buka tab DAFTARKAN untuk memulai.</div>';
@@ -1196,7 +1303,7 @@ async function loadPeople() {
         const name = decodeURIComponent(b.dataset.name);
         if (b.dataset.action === "hapus") {
           if (!confirm(`Hapus semua data wajah "${name}"?`)) return;
-          fetch("/api/people/" + b.dataset.name, { method: "DELETE" }).then(loadPeople);
+          apiFetch("/api/people/" + b.dataset.name, { method: "DELETE" }).then(loadPeople).catch(() => {});
         } else if (b.dataset.action === "edit") {
           openEditPerson(b.closest(".person-row"), name, b.dataset.title);
         }
@@ -1229,7 +1336,7 @@ function openEditPerson(row, name, currentTitle) {
       if (!newName) { alert("Nama tidak boleh kosong"); return; }
       b.disabled = true; b.textContent = "…";
       try {
-        const res = await fetch("/api/people/" + encodeURIComponent(name), {
+        const res = await apiFetch("/api/people/" + encodeURIComponent(name), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ new_name: newName, title: newTitle }),
