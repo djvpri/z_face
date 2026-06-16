@@ -7,7 +7,6 @@ Jalankan: uvicorn main:app --reload
 import os
 
 import cv2
-import jwt
 import numpy as np
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
@@ -22,7 +21,6 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 ADMIN_KEY = os.getenv("ADMIN_KEY", "")
 
 supabase = None
@@ -62,21 +60,17 @@ def require_db():
 
 
 def get_session(authorization: str = Header(default="")):
-    """Verifikasi JWT dan kembalikan {user_id, org_id, role}."""
-    if not JWT_SECRET:
-        raise HTTPException(503, "SUPABASE_JWT_SECRET belum dikonfigurasi di server")
+    """Verifikasi JWT via Supabase API dan kembalikan {user_id, org_id, role}."""
+    if not supabase_anon:
+        raise HTTPException(503, "Auth belum dikonfigurasi (SUPABASE_ANON_KEY)")
     if not authorization.startswith("Bearer "):
         raise HTTPException(401, "Token tidak ditemukan. Silakan login.")
     token = authorization[7:]
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"], audience="authenticated")
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(401, "Sesi sudah berakhir, silakan login kembali")
+        user_res = supabase_anon.auth.get_user(token)
+        user_id = str(user_res.user.id)
     except Exception:
-        raise HTTPException(401, "Token tidak valid")
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(401, "Token tidak valid")
+        raise HTTPException(401, "Sesi tidak valid atau sudah berakhir. Silakan login kembali.")
     require_db()
     res = supabase.table("org_members").select("org_id, role").eq("user_id", user_id).execute()
     if not res.data:
