@@ -998,16 +998,14 @@ let lastGuestSpoken = null;
 
 function speakGuestGreeting(text) {
   if (!("speechSynthesis" in window)) return;
-  window.speechSynthesis.cancel();
-  // Chrome needs a brief gap after cancel() before speak() works reliably
-  setTimeout(() => {
-    const utter = new SpeechSynthesisUtterance(text);
-    const voices = window.speechSynthesis.getVoices();
-    const idVoice = voices.find((v) => v.lang.startsWith("id"));
-    if (idVoice) utter.voice = idVoice;
-    // fall back to system default voice if no Indonesian voice installed
-    window.speechSynthesis.speak(utter);
-  }, 50);
+  if (window.speechSynthesis.speaking) return;
+  // resume() dulu supaya Chrome tidak mandek, lalu speak
+  window.speechSynthesis.resume();
+  const utter = new SpeechSynthesisUtterance(text);
+  const voices = window.speechSynthesis.getVoices();
+  const idVoice = voices.find((v) => v.lang.startsWith("id"));
+  if (idVoice) utter.voice = idVoice;
+  window.speechSynthesis.speak(utter);
 }
 
 async function startGuest() {
