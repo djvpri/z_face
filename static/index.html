@@ -998,14 +998,15 @@ let lastGuestSpoken = null;
 
 function speakGuestGreeting(text) {
   if (!("speechSynthesis" in window)) return;
-  if (window.speechSynthesis.speaking) return;
-  // resume() dulu supaya Chrome tidak mandek, lalu speak
-  window.speechSynthesis.resume();
-  const utter = new SpeechSynthesisUtterance(text);
-  const voices = window.speechSynthesis.getVoices();
-  const idVoice = voices.find((v) => v.lang.startsWith("id"));
-  if (idVoice) utter.voice = idVoice;
-  window.speechSynthesis.speak(utter);
+  window.speechSynthesis.cancel();  // bersihkan antrian
+  window.speechSynthesis.resume();  // unstick kalau Chrome paused
+  setTimeout(() => {
+    const utter = new SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+    const idVoice = voices.find((v) => v.lang.startsWith("id"));
+    if (idVoice) utter.voice = idVoice;
+    window.speechSynthesis.speak(utter);
+  }, 100);
 }
 
 async function startGuest() {
