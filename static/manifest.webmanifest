@@ -1,12 +1,12 @@
 {
-  "name": "Face ID — Identifikasi Wajah",
-  "short_name": "FaceID",
-  "description": "Identifikasi dan daftarkan wajah menggunakan InsightFace + Supabase",
-  "start_url": "/",
+  "name": "ZFace — Identifikasi Wajah AI",
+  "short_name": "ZFace",
+  "description": "Sistem identifikasi wajah berbasis AI untuk absensi dan kontrol akses",
+  "start_url": "/app",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#E9EDF1",
-  "theme_color": "#0E6E66",
+  "background_color": "#0b1520",
+  "theme_color": "#3b9eff",
   "lang": "id",
   "icons": [
     {

@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZFace — Sistem Identifikasi Wajah Berbasis AI</title>
 <meta name="description" content="ZFace menghadirkan teknologi pengenalan wajah AI untuk absensi, akses kontrol, dan keamanan bisnis Anda. Akurat, cepat, mudah digunakan.">
+<meta name="theme-color" content="#3b9eff">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
@@ -469,5 +472,10 @@
   <a href="/app" style="font-size:.85rem; color:var(--muted);">Login ke App &rarr;</a>
 </footer>
 
+<script>
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js");
+  }
+</script>
 </body>
 </html>

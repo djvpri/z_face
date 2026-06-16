@@ -1,6 +1,7 @@
-const CACHE_NAME = "faceid-v1";
+const CACHE_NAME = "zface-v2";
 const PRECACHE = [
   "/",
+  "/app",
   "/static/manifest.webmanifest",
   "/static/icons/icon-192.png",
   "/static/icons/icon-512.png",
