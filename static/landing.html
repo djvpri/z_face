@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZFace — Sistem Identifikasi Wajah Berbasis AI</title>
+<meta name="description" content="ZFace menghadirkan teknologi pengenalan wajah AI untuk absensi, akses kontrol, dan keamanan bisnis Anda. Akurat, cepat, mudah digunakan.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0b1520;
+    --surface: #111e2d;
+    --surface2: #172438;
+    --border: rgba(59,158,255,0.12);
+    --ink: #e8f0f7;
+    --muted: #7a99b5;
+    --accent: #3b9eff;
+    --accent2: #1a7fe8;
+    --green: #4ade80;
+    --display: 'Syne', sans-serif;
+    --body: 'Inter', sans-serif;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  a { color: inherit; text-decoration: none; }
+
+  /* ---- NAV ---- */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 5%; height: 64px;
+    background: rgba(11,21,32,0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-logo { font-family: var(--display); font-size: 1.4rem; font-weight: 800; letter-spacing: -0.02em; }
+  .nav-logo span { color: var(--accent); }
+  .nav-links { display: flex; align-items: center; gap: 32px; }
+  .nav-links a { font-size: 0.875rem; color: var(--muted); transition: color .2s; }
+  .nav-links a:hover { color: var(--ink); }
+  .btn-nav {
+    background: var(--accent); color: #fff;
+    padding: 8px 20px; border-radius: 8px;
+    font-size: 0.875rem; font-weight: 600;
+    transition: background .2s;
+  }
+  .btn-nav:hover { background: var(--accent2); color: #fff; }
+
+  /* ---- HERO ---- */
+  .hero {
+    min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+    padding: 100px 5% 80px;
+    position: relative; overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute; top: -200px; left: 50%; transform: translateX(-50%);
+    width: 800px; height: 800px;
+    background: radial-gradient(circle, rgba(59,158,255,0.12) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(59,158,255,0.1); border: 1px solid rgba(59,158,255,0.25);
+    color: var(--accent); border-radius: 100px;
+    padding: 6px 16px; font-size: 0.8rem; font-weight: 600;
+    margin-bottom: 28px; letter-spacing: 0.04em;
+  }
+  .hero h1 {
+    font-family: var(--display);
+    font-size: clamp(2.4rem, 6vw, 4.5rem);
+    font-weight: 800; line-height: 1.1;
+    letter-spacing: -0.03em;
+    max-width: 800px; margin-bottom: 24px;
+  }
+  .hero h1 span { color: var(--accent); }
+  .hero p {
+    font-size: clamp(1rem, 2vw, 1.2rem);
+    color: var(--muted); max-width: 560px;
+    margin: 0 auto 40px; line-height: 1.7;
+  }
+  .hero-cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn-primary {
+    background: var(--accent); color: #fff;
+    padding: 14px 32px; border-radius: 10px;
+    font-size: 1rem; font-weight: 600;
+    transition: background .2s, transform .1s;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .btn-primary:hover { background: var(--accent2); transform: translateY(-1px); }
+  .btn-secondary {
+    background: var(--surface2); color: var(--ink);
+    border: 1px solid var(--border);
+    padding: 14px 32px; border-radius: 10px;
+    font-size: 1rem; font-weight: 600;
+    transition: background .2s;
+  }
+  .btn-secondary:hover { background: var(--surface); }
+  .hero-meta {
+    margin-top: 56px;
+    display: flex; gap: 40px; justify-content: center; flex-wrap: wrap;
+  }
+  .hero-stat { text-align: center; }
+  .hero-stat .num { font-family: var(--display); font-size: 1.8rem; font-weight: 800; color: var(--accent); }
+  .hero-stat .label { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+
+  /* ---- SECTION COMMON ---- */
+  section { padding: 96px 5%; }
+  .section-label {
+    font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em;
+    color: var(--accent); text-transform: uppercase; margin-bottom: 12px;
+  }
+  .section-title {
+    font-family: var(--display); font-size: clamp(1.8rem, 4vw, 2.8rem);
+    font-weight: 800; letter-spacing: -0.02em; line-height: 1.2;
+    margin-bottom: 16px;
+  }
+  .section-desc { color: var(--muted); max-width: 520px; font-size: 1.05rem; line-height: 1.7; }
+  .centered { text-align: center; }
+  .centered .section-desc { margin: 0 auto; }
+
+  /* ---- FEATURES ---- */
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px; margin-top: 56px;
+  }
+  .feature-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px; padding: 28px;
+    transition: border-color .2s, transform .2s;
+  }
+  .feature-card:hover { border-color: rgba(59,158,255,0.35); transform: translateY(-3px); }
+  .feature-icon {
+    width: 48px; height: 48px; border-radius: 12px;
+    background: rgba(59,158,255,0.12);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.4rem; margin-bottom: 16px;
+  }
+  .feature-card h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 8px; }
+  .feature-card p { font-size: 0.875rem; color: var(--muted); line-height: 1.65; }
+
+  /* ---- HOW IT WORKS ---- */
+  .how-bg { background: var(--surface); }
+  .steps {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 32px; margin-top: 56px;
+  }
+  .step { text-align: center; }
+  .step-num {
+    width: 52px; height: 52px; border-radius: 50%;
+    background: var(--accent); color: #fff;
+    font-family: var(--display); font-size: 1.2rem; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 16px;
+  }
+  .step h3 { font-weight: 700; margin-bottom: 8px; }
+  .step p { font-size: 0.875rem; color: var(--muted); line-height: 1.65; }
+
+  /* ---- USE CASES ---- */
+  .usecase-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 16px; margin-top: 56px;
+  }
+  .usecase-card {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px 16px;
+    text-align: center; transition: border-color .2s;
+  }
+  .usecase-card:hover { border-color: rgba(59,158,255,0.35); }
+  .usecase-card .icon { font-size: 2rem; margin-bottom: 10px; }
+  .usecase-card span { font-size: 0.9rem; font-weight: 600; }
+
+  /* ---- PRICING ---- */
+  .pricing-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 24px; margin-top: 56px; align-items: start;
+  }
+  .pricing-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px; padding: 36px 32px;
+    position: relative;
+  }
+  .pricing-card.featured {
+    border-color: var(--accent);
+    background: linear-gradient(160deg, rgba(59,158,255,0.08) 0%, var(--surface) 60%);
+  }
+  .featured-badge {
+    position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+    background: var(--accent); color: #fff;
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em;
+    padding: 4px 16px; border-radius: 100px; white-space: nowrap;
+  }
+  .pricing-tier { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em; color: var(--accent); text-transform: uppercase; margin-bottom: 8px; }
+  .pricing-price {
+    font-family: var(--display); font-size: 2.4rem; font-weight: 800;
+    line-height: 1; margin-bottom: 4px;
+  }
+  .pricing-price sub { font-size: 1rem; font-weight: 600; vertical-align: super; font-family: var(--body); }
+  .pricing-period { font-size: 0.8rem; color: var(--muted); margin-bottom: 24px; }
+  .pricing-desc { font-size: 0.875rem; color: var(--muted); margin-bottom: 24px; line-height: 1.6; }
+  .pricing-divider { border: none; border-top: 1px solid var(--border); margin-bottom: 24px; }
+  .pricing-features { list-style: none; display: flex; flex-direction: column; gap: 12px; margin-bottom: 32px; }
+  .pricing-features li { display: flex; align-items: flex-start; gap: 10px; font-size: 0.875rem; }
+  .pricing-features li::before { content: '✓'; color: var(--green); font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+  .pricing-features li.disabled { color: var(--muted); }
+  .pricing-features li.disabled::before { content: '–'; color: var(--muted); }
+  .btn-pricing {
+    width: 100%; padding: 13px; border-radius: 10px;
+    font-size: 0.95rem; font-weight: 600; text-align: center;
+    display: block; transition: all .2s;
+  }
+  .btn-pricing-outline {
+    border: 1px solid var(--border); color: var(--ink);
+    background: transparent;
+  }
+  .btn-pricing-outline:hover { background: var(--surface2); border-color: var(--accent); }
+  .btn-pricing-filled {
+    background: var(--accent); color: #fff; border: none;
+  }
+  .btn-pricing-filled:hover { background: var(--accent2); }
+
+  /* ---- CTA BANNER ---- */
+  .cta-banner {
+    background: linear-gradient(135deg, rgba(59,158,255,0.15) 0%, rgba(26,127,232,0.08) 100%);
+    border: 1px solid rgba(59,158,255,0.25);
+    border-radius: 24px; padding: 64px 40px;
+    text-align: center; margin: 0 5% 96px;
+  }
+  .cta-banner h2 { font-family: var(--display); font-size: clamp(1.6rem, 4vw, 2.4rem); font-weight: 800; margin-bottom: 16px; }
+  .cta-banner p { color: var(--muted); margin-bottom: 32px; max-width: 480px; margin-left: auto; margin-right: auto; }
+
+  /* ---- FOOTER ---- */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 40px 5%; display: flex;
+    justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 16px;
+  }
+  footer .logo { font-family: var(--display); font-weight: 800; font-size: 1.1rem; }
+  footer .logo span { color: var(--accent); }
+  footer p { font-size: 0.8rem; color: var(--muted); }
+
+  /* ---- RESPONSIVE ---- */
+  @media (max-width: 640px) {
+    nav { padding: 0 20px; }
+    .nav-links { gap: 16px; }
+    .nav-links a:not(.btn-nav) { display: none; }
+    section { padding: 72px 20px; }
+    .cta-banner { padding: 48px 24px; margin: 0 20px 72px; }
+    footer { padding: 32px 20px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">Z<span>Face</span></div>
+  <div class="nav-links">
+    <a href="#fitur">Fitur</a>
+    <a href="#harga">Harga</a>
+    <a href="#kontak">Kontak</a>
+    <a href="/app" class="btn-nav">Masuk ke App</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-badge">&#9889; Didukung Teknologi AI InsightFace</div>
+  <h1>Kenali Wajah,<br><span>Tingkatkan Keamanan</span></h1>
+  <p>ZFace adalah sistem identifikasi wajah berbasis AI yang akurat dan real-time — cocok untuk absensi, kontrol akses, dan manajemen pengunjung bisnis Anda.</p>
+  <div class="hero-cta">
+    <a href="#harga" class="btn-primary">Lihat Paket Harga &rarr;</a>
+    <a href="/app" class="btn-secondary">Coba Demo</a>
+  </div>
+  <div class="hero-meta">
+    <div class="hero-stat"><div class="num">99%+</div><div class="label">Akurasi Deteksi</div></div>
+    <div class="hero-stat"><div class="num">&lt;1 dtk</div><div class="label">Waktu Identifikasi</div></div>
+    <div class="hero-stat"><div class="num">Multi</div><div class="label">Perangkat (PWA)</div></div>
+    <div class="hero-stat"><div class="num">Real-time</div><div class="label">Deteksi Langsung</div></div>
+  </div>
+</section>
+
+<!-- FITUR -->
+<section id="fitur">
+  <div class="centered">
+    <div class="section-label">Fitur Unggulan</div>
+    <h2 class="section-title">Semua yang Anda Butuhkan</h2>
+    <p class="section-desc">Dari identifikasi satu foto hingga pemantauan real-time — ZFace dirancang untuk kemudahan penggunaan sehari-hari.</p>
+  </div>
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon">&#128247;</div>
+      <h3>Identifikasi Foto</h3>
+      <p>Upload foto dan sistem langsung mengenali semua wajah yang ada, lengkap dengan tingkat kemiripan dan data orang yang terdaftar.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#128250;</div>
+      <h3>Mode Real-time</h3>
+      <p>Pantau siapa yang masuk secara langsung melalui kamera. Identifikasi terjadi otomatis dan hasilnya tampil seketika.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#128101;</div>
+      <h3>Mode Tamu</h3>
+      <p>Tampilkan sapaan khusus saat tamu yang belum terdaftar terdeteksi. Ideal untuk resepsionis atau pintu masuk otomatis.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#128202;</div>
+      <h3>Riwayat Deteksi</h3>
+      <p>Semua aktivitas deteksi tercatat otomatis. Lihat siapa yang hadir, kapan, dan dari mode apa — lengkap dan terstruktur.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#128203;</div>
+      <h3>Database Wajah</h3>
+      <p>Daftarkan wajah dengan mudah — satu orang bisa memiliki beberapa foto untuk meningkatkan akurasi pengenalan.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#128241;</div>
+      <h3>Akses Multi-perangkat</h3>
+      <p>Berjalan di browser — bisa digunakan dari HP, tablet, maupun laptop tanpa perlu instal aplikasi tambahan.</p>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how-bg">
+  <div class="centered">
+    <div class="section-label">Cara Kerja</div>
+    <h2 class="section-title">Mudah Digunakan dalam 3 Langkah</h2>
+    <p class="section-desc">Tidak perlu keahlian teknis. ZFace dirancang agar siapa pun bisa langsung menggunakannya.</p>
+  </div>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <h3>Daftarkan Wajah</h3>
+      <p>Upload foto orang yang ingin dikenali. Semakin banyak foto, semakin akurat pengenalan wajahnya.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <h3>Aktifkan Kamera</h3>
+      <p>Nyalakan mode real-time atau upload foto untuk identifikasi. Sistem AI bekerja otomatis di balik layar.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <h3>Pantau Riwayat</h3>
+      <p>Lihat semua aktivitas deteksi secara real-time. Semua log tersimpan rapi dan bisa diakses kapan saja.</p>
+    </div>
+  </div>
+</section>
+
+<!-- USE CASES -->
+<section>
+  <div class="centered">
+    <div class="section-label">Cocok Untuk</div>
+    <h2 class="section-title">Berbagai Kebutuhan Bisnis</h2>
+    <p class="section-desc">ZFace fleksibel dan bisa diterapkan di berbagai industri.</p>
+  </div>
+  <div class="usecase-grid">
+    <div class="usecase-card"><div class="icon">&#127970;</div><span>Kantor & Perusahaan</span></div>
+    <div class="usecase-card"><div class="icon">&#127979;</div><span>Sekolah & Kampus</span></div>
+    <div class="usecase-card"><div class="icon">&#127968;</div><span>Hotel & Penginapan</span></div>
+    <div class="usecase-card"><div class="icon">&#127973;</div><span>Klinik & Rumah Sakit</span></div>
+    <div class="usecase-card"><div class="icon">&#127981;</div><span>Pabrik & Gudang</span></div>
+    <div class="usecase-card"><div class="icon">&#127970;</div><span>Gedung & Apartemen</span></div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section id="harga" style="background: var(--surface);">
+  <div class="centered">
+    <div class="section-label">Harga</div>
+    <h2 class="section-title">Pilih Paket yang Tepat</h2>
+    <p class="section-desc">Mulai dari Rp 50.000 per bulan. Tidak ada biaya tersembunyi.</p>
+  </div>
+  <div class="pricing-grid">
+
+    <!-- Starter -->
+    <div class="pricing-card">
+      <div class="pricing-tier">Starter</div>
+      <div class="pricing-price"><sub>Rp</sub>50.000</div>
+      <div class="pricing-period">per bulan</div>
+      <div class="pricing-desc">Cocok untuk bisnis kecil atau uji coba sistem pengenalan wajah.</div>
+      <hr class="pricing-divider">
+      <ul class="pricing-features">
+        <li>Hingga 100 wajah terdaftar</li>
+        <li>Identifikasi foto</li>
+        <li>Mode real-time</li>
+        <li>Riwayat 30 hari</li>
+        <li>1 akun pengguna</li>
+        <li class="disabled">Mode tamu</li>
+        <li class="disabled">Dukungan prioritas</li>
+      </ul>
+      <a href="#kontak" class="btn-pricing btn-pricing-outline">Mulai Sekarang</a>
+    </div>
+
+    <!-- Pro -->
+    <div class="pricing-card featured">
+      <div class="featured-badge">PALING POPULER</div>
+      <div class="pricing-tier">Pro</div>
+      <div class="pricing-price"><sub>Rp</sub>150.000</div>
+      <div class="pricing-period">per bulan</div>
+      <div class="pricing-desc">Untuk bisnis yang butuh lebih banyak kapasitas dan fitur lengkap.</div>
+      <hr class="pricing-divider">
+      <ul class="pricing-features">
+        <li>Hingga 500 wajah terdaftar</li>
+        <li>Identifikasi foto</li>
+        <li>Mode real-time</li>
+        <li>Riwayat tidak terbatas</li>
+        <li>5 akun pengguna</li>
+        <li>Mode tamu + sapaan kustom</li>
+        <li>Dukungan prioritas via WhatsApp</li>
+      </ul>
+      <a href="#kontak" class="btn-pricing btn-pricing-filled">Mulai Sekarang</a>
+    </div>
+
+    <!-- Enterprise -->
+    <div class="pricing-card">
+      <div class="pricing-tier">Enterprise</div>
+      <div class="pricing-price"><sub>Rp</sub>1,5 Juta</div>
+      <div class="pricing-period">per bulan</div>
+      <div class="pricing-desc">Solusi penuh untuk perusahaan besar dengan kebutuhan skala tinggi.</div>
+      <hr class="pricing-divider">
+      <ul class="pricing-features">
+        <li>Wajah tidak terbatas</li>
+        <li>Semua fitur Pro</li>
+        <li>Pengguna tidak terbatas</li>
+        <li>Setup & onboarding langsung</li>
+        <li>Integrasi custom</li>
+        <li>SLA & uptime terjamin</li>
+        <li>Dukungan dedicated</li>
+      </ul>
+      <a href="#kontak" class="btn-pricing btn-pricing-outline">Hubungi Kami</a>
+    </div>
+
+  </div>
+</section>
+
+<!-- CTA BANNER -->
+<div class="cta-banner" id="kontak">
+  <h2>Siap Mulai Menggunakan ZFace?</h2>
+  <p>Hubungi kami via WhatsApp untuk aktivasi akun atau pertanyaan lebih lanjut. Respons cepat, setup mudah.</p>
+  <a href="https://wa.me/628XXXXXXXXXX?text=Halo%2C%20saya%20tertarik%20dengan%20ZFace" class="btn-primary" target="_blank">
+    &#128172; Chat via WhatsApp
+  </a>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="logo">Z<span>Face</span></div>
+  <p>&copy; 2025 ZFace. Sistem Identifikasi Wajah Berbasis AI.</p>
+  <a href="/app" style="font-size:.85rem; color:var(--muted);">Login ke App &rarr;</a>
+</footer>
+
+</body>
+</html>
