@@ -6,4 +6,6 @@ numpy
 opencv-python-headless
 onnxruntime
 insightface
-supabase
+psycopg2-binary
+PyJWT
+bcrypt

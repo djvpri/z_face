@@ -1,37 +1,37 @@
 """
 ZFace API — Identifikasi orang dari foto
-Stack: FastAPI + InsightFace (buffalo_l) + Supabase pgvector
-Jalankan: uvicorn main:app --reload
+Stack: FastAPI + InsightFace (buffalo_l) + Railway PostgreSQL + pgvector
 """
 
+import datetime
+import json
 import os
 
+import bcrypt
 import cv2
+import jwt
 import numpy as np
+import psycopg2
+import psycopg2.extras
+import psycopg2.pool
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from supabase import create_client
 
 load_dotenv()
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+JWT_SECRET = os.getenv("JWT_SECRET", "")
 ADMIN_KEY = os.getenv("ADMIN_KEY", "")
 
-supabase = None
-supabase_anon = None
-if SUPABASE_URL and SUPABASE_KEY:
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-if SUPABASE_URL and SUPABASE_ANON_KEY:
-    supabase_anon = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+db_pool: psycopg2.pool.ThreadedConnectionPool | None = None
+if DATABASE_URL:
+    db_pool = psycopg2.pool.ThreadedConnectionPool(1, 10, DATABASE_URL)
 
 # ----- Model InsightFace -----
-# Model buffalo_l (~280 MB) otomatis diunduh ke ~/.insightface saat pertama kali dijalankan
 print("Memuat model InsightFace (buffalo_l)...")
 from insightface.app import FaceAnalysis  # noqa: E402
 
@@ -49,34 +49,87 @@ app.add_middleware(
 )
 
 
-# ----- Helpers -----
+# ----- DB helpers -----
 
 def require_db():
-    if supabase is None:
-        raise HTTPException(
-            status_code=500,
-            detail="Supabase belum dikonfigurasi. Isi SUPABASE_URL dan SUPABASE_SERVICE_KEY di file .env",
-        )
+    if db_pool is None:
+        raise HTTPException(500, "Database belum dikonfigurasi (DATABASE_URL)")
 
+
+def db_one(sql: str, params=()):
+    """Jalankan query dan kembalikan satu baris sebagai dict, atau None."""
+    require_db()
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params)
+            row = cur.fetchone()
+            return dict(row) if row else None
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        db_pool.putconn(conn)
+
+
+def db_all(sql: str, params=()):
+    """Jalankan query dan kembalikan semua baris sebagai list of dict."""
+    require_db()
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params)
+            return [dict(r) for r in cur.fetchall()]
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        db_pool.putconn(conn)
+
+
+def db_run(sql: str, params=()):
+    """Jalankan INSERT/UPDATE/DELETE dan kembalikan baris RETURNING."""
+    require_db()
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params)
+            rows = [dict(r) for r in cur.fetchall()] if cur.description else []
+        conn.commit()
+        return rows
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        db_pool.putconn(conn)
+
+
+def vec(embedding: list[float]) -> str:
+    """Konversi embedding list ke format string pgvector."""
+    return "[" + ",".join(str(v) for v in embedding) + "]"
+
+
+# ----- Auth helpers -----
 
 def get_session(authorization: str = Header(default="")):
-    """Verifikasi JWT via Supabase API dan kembalikan {user_id, org_id, role}."""
-    if not supabase_anon:
-        raise HTTPException(503, "Auth belum dikonfigurasi (SUPABASE_ANON_KEY)")
+    """Verifikasi JWT dan kembalikan {user_id, org_id, role}."""
+    if not JWT_SECRET:
+        raise HTTPException(503, "Auth belum dikonfigurasi (JWT_SECRET)")
     if not authorization.startswith("Bearer "):
         raise HTTPException(401, "Token tidak ditemukan. Silakan login.")
     token = authorization[7:]
     try:
-        user_res = supabase_anon.auth.get_user(token)
-        user_id = str(user_res.user.id)
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        user_id = payload["sub"]
     except Exception:
         raise HTTPException(401, "Sesi tidak valid atau sudah berakhir. Silakan login kembali.")
-    require_db()
-    res = supabase.table("org_members").select("org_id, role").eq("user_id", user_id).execute()
-    if not res.data:
+    row = db_one(
+        "SELECT org_id, role FROM org_members WHERE user_id = %s LIMIT 1",
+        (user_id,),
+    )
+    if not row:
         raise HTTPException(403, "Akun tidak terdaftar di organisasi manapun. Hubungi admin.")
-    row = res.data[0]
-    return {"user_id": user_id, "org_id": row["org_id"], "role": row["role"]}
+    return {"user_id": user_id, "org_id": str(row["org_id"]), "role": row["role"]}
 
 
 def require_admin(x_admin_key: str = Header(default="")):
@@ -84,14 +137,16 @@ def require_admin(x_admin_key: str = Header(default="")):
         raise HTTPException(403, "Akses ditolak")
 
 
+# ----- Image helpers -----
+
 async def read_image(file: UploadFile) -> np.ndarray:
     data = await file.read()
     if not data:
-        raise HTTPException(status_code=400, detail="File kosong")
+        raise HTTPException(400, "File kosong")
     arr = np.frombuffer(data, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
-        raise HTTPException(status_code=400, detail="File bukan gambar yang valid (gunakan JPG/PNG)")
+        raise HTTPException(400, "File bukan gambar yang valid (gunakan JPG/PNG)")
     max_side = 1600
     h, w = img.shape[:2]
     if max(h, w) > max_side:
@@ -120,23 +175,35 @@ class LoginRequest(BaseModel):
 
 @app.post("/api/auth/login")
 def login(body: LoginRequest):
-    if not supabase_anon:
-        raise HTTPException(503, "Auth belum dikonfigurasi (SUPABASE_ANON_KEY)")
-    try:
-        res = supabase_anon.auth.sign_in_with_password({"email": body.email, "password": body.password})
-    except Exception:
+    if not JWT_SECRET:
+        raise HTTPException(503, "Auth belum dikonfigurasi (JWT_SECRET)")
+    row = db_one("SELECT id, password_hash FROM users WHERE email = %s", (body.email,))
+    if not row:
         raise HTTPException(401, "Email atau password salah")
-    return {
-        "access_token": res.session.access_token,
-        "user": {"id": str(res.user.id), "email": res.user.email},
-    }
+    pw_ok = bcrypt.checkpw(body.password.encode(), row["password_hash"].encode())
+    if not pw_ok:
+        raise HTTPException(401, "Email atau password salah")
+    user_id = str(row["id"])
+    token = jwt.encode(
+        {
+            "sub": user_id,
+            "email": body.email,
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(days=30),
+        },
+        JWT_SECRET,
+        algorithm="HS256",
+    )
+    return {"access_token": token, "user": {"id": user_id, "email": body.email}}
 
 
 @app.get("/api/auth/me")
 def get_me(session: dict = Depends(get_session)):
-    require_db()
-    res = supabase.table("organizations").select("name, plan, quota_faces").eq("id", session["org_id"]).execute()
-    org = res.data[0] if res.data else {}
+    row = db_one(
+        "SELECT o.name, o.plan, o.quota_faces FROM organizations o "
+        "JOIN org_members m ON m.org_id = o.id WHERE m.user_id = %s LIMIT 1",
+        (session["user_id"],),
+    )
+    org = row or {}
     return {
         "user_id": session["user_id"],
         "org_id": session["org_id"],
@@ -164,44 +231,38 @@ class UserCreateRequest(BaseModel):
 
 @app.post("/api/admin/organizations")
 def admin_create_org(body: OrgCreateRequest, _=Depends(require_admin)):
-    require_db()
     if not body.name.strip():
         raise HTTPException(400, "Nama organisasi tidak boleh kosong")
-    res = supabase.table("organizations").insert({
-        "name": body.name.strip(),
-        "plan": body.plan,
-        "quota_faces": body.quota_faces,
-        "active": True,
-    }).execute()
-    return {"organization": res.data[0] if res.data else None}
+    rows = db_run(
+        "INSERT INTO organizations (name, plan, quota_faces, active) VALUES (%s, %s, %s, TRUE) RETURNING *",
+        (body.name.strip(), body.plan, body.quota_faces),
+    )
+    return {"organization": rows[0] if rows else None}
 
 
 @app.get("/api/admin/organizations")
 def admin_list_orgs(_=Depends(require_admin)):
-    require_db()
-    res = supabase.table("organizations").select("*").order("created_at").execute()
-    return {"organizations": res.data}
+    rows = db_all("SELECT * FROM organizations ORDER BY created_at")
+    return {"organizations": rows}
 
 
 @app.post("/api/admin/users")
 def admin_create_user(body: UserCreateRequest, _=Depends(require_admin)):
-    require_db()
     if body.role not in ("owner", "admin", "member"):
         raise HTTPException(400, "Role tidak valid. Pilih: owner, admin, member")
+    pw_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode()
     try:
-        user_res = supabase.auth.admin.create_user({
-            "email": body.email,
-            "password": body.password,
-            "email_confirm": True,
-        })
+        rows = db_run(
+            "INSERT INTO users (email, password_hash) VALUES (%s, %s) RETURNING id",
+            (body.email, pw_hash),
+        )
     except Exception as e:
         raise HTTPException(400, f"Gagal membuat user: {e}")
-    user_id = str(user_res.user.id)
-    supabase.table("org_members").insert({
-        "org_id": body.org_id,
-        "user_id": user_id,
-        "role": body.role,
-    }).execute()
+    user_id = str(rows[0]["id"])
+    db_run(
+        "INSERT INTO org_members (org_id, user_id, role) VALUES (%s, %s, %s)",
+        (body.org_id, user_id, body.role),
+    )
     return {"user_id": user_id, "email": body.email, "org_id": body.org_id, "role": body.role}
 
 
@@ -212,7 +273,7 @@ def health():
     return {
         "status": "ok",
         "model": "buffalo_l",
-        "database": "terhubung" if supabase else "belum dikonfigurasi",
+        "database": "terhubung" if db_pool else "belum dikonfigurasi",
     }
 
 
@@ -225,7 +286,6 @@ async def identify(
     session: dict = Depends(get_session),
 ):
     """Identifikasi semua wajah dalam foto."""
-    require_db()
     img = await read_image(file)
     h, w = img.shape[:2]
     faces = detect_faces(img)
@@ -233,21 +293,14 @@ async def identify(
     results = []
     for face in faces:
         embedding = face.normed_embedding.astype(float).tolist()
-        rpc = supabase.rpc(
-            "match_faces",
-            {
-                "query_embedding": embedding,
-                "match_threshold": threshold,
-                "match_count": 3,
-                "filter_org_id": session["org_id"],
-            },
-        ).execute()
-
+        rows = db_all(
+            "SELECT * FROM match_faces(%s::vector, %s, %s, %s::uuid)",
+            (vec(embedding), threshold, 3, session["org_id"]),
+        )
         matches = [
-            {"id": m["id"], "name": m["name"], "similarity": round(m["similarity"], 4)}
-            for m in (rpc.data or [])
+            {"id": str(m["id"]), "name": m["name"], "similarity": round(float(m["similarity"]), 4)}
+            for m in rows
         ]
-
         x1, y1, x2, y2 = [int(v) for v in face.bbox]
         results.append({
             "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
@@ -266,37 +319,33 @@ async def register_face(
     file: UploadFile = File(...),
     session: dict = Depends(get_session),
 ):
-    """Daftarkan wajah baru. Satu orang boleh didaftarkan beberapa kali
-    dengan foto berbeda untuk meningkatkan akurasi."""
-    require_db()
+    """Daftarkan wajah baru dari foto."""
     org_id = session["org_id"]
     name = name.strip()
     if not name:
-        raise HTTPException(status_code=400, detail="Nama tidak boleh kosong")
+        raise HTTPException(400, "Nama tidak boleh kosong")
 
-    org_res = supabase.table("organizations").select("quota_faces, plan").eq("id", org_id).execute()
-    org = org_res.data[0] if org_res.data else {}
-    count_res = supabase.table("faces").select("id", count="exact").eq("org_id", org_id).execute()
+    org = db_one("SELECT quota_faces, plan FROM organizations WHERE id = %s::uuid", (org_id,)) or {}
+    count_row = db_one("SELECT COUNT(*) AS cnt FROM faces WHERE org_id = %s::uuid", (org_id,))
     quota = org.get("quota_faces")
-    if quota and count_res.count is not None and count_res.count >= quota:
+    count = int(count_row["cnt"]) if count_row else 0
+    if quota and count >= quota:
         raise HTTPException(400, f"Kuota wajah ({quota}) sudah penuh untuk plan {org.get('plan', '')}")
 
     img = await read_image(file)
     faces = detect_faces(img)
     if not faces:
-        raise HTTPException(status_code=400, detail="Tidak ada wajah terdeteksi di foto")
+        raise HTTPException(400, "Tidak ada wajah terdeteksi di foto")
 
     face = largest_face(faces)
     embedding = face.normed_embedding.astype(float).tolist()
 
-    res = supabase.table("faces").insert({
-        "name": name,
-        "embedding": embedding,
-        "org_id": org_id,
-    }).execute()
-
+    rows = db_run(
+        "INSERT INTO faces (name, embedding, org_id) VALUES (%s, %s::vector, %s::uuid) RETURNING id",
+        (name, vec(embedding), org_id),
+    )
     return {
-        "id": res.data[0]["id"],
+        "id": str(rows[0]["id"]),
         "name": name,
         "faces_detected": len(faces),
         "note": "Lebih dari satu wajah terdeteksi; wajah terbesar yang didaftarkan"
@@ -313,20 +362,16 @@ class EmbeddingRegisterRequest(BaseModel):
 @app.post("/api/register-embedding")
 def register_embedding(body: EmbeddingRegisterRequest, session: dict = Depends(get_session)):
     """Daftarkan wajah dari embedding yang sudah dihitung sebelumnya."""
-    require_db()
-    org_id = session["org_id"]
     name = body.name.strip()
     if not name:
-        raise HTTPException(status_code=400, detail="Nama tidak boleh kosong")
+        raise HTTPException(400, "Nama tidak boleh kosong")
     if len(body.embedding) != 512:
-        raise HTTPException(status_code=400, detail="Embedding tidak valid")
-
-    res = supabase.table("faces").insert({
-        "name": name,
-        "embedding": body.embedding,
-        "org_id": org_id,
-    }).execute()
-    return {"id": res.data[0]["id"], "name": name}
+        raise HTTPException(400, "Embedding tidak valid")
+    rows = db_run(
+        "INSERT INTO faces (name, embedding, org_id) VALUES (%s, %s::vector, %s::uuid) RETURNING id",
+        (name, vec(body.embedding), session["org_id"]),
+    )
+    return {"id": str(rows[0]["id"]), "name": name}
 
 
 class LogEntryRequest(BaseModel):
@@ -340,36 +385,40 @@ class LogEntryRequest(BaseModel):
 @app.post("/api/logs")
 def create_log(body: LogEntryRequest, session: dict = Depends(get_session)):
     """Catat satu hasil deteksi ke riwayat."""
-    require_db()
     if body.source not in ("identify", "realtime", "guest"):
-        raise HTTPException(status_code=400, detail="Source tidak valid")
-    row: dict = {
-        "name": body.name,
-        "similarity": body.similarity,
-        "det_score": body.det_score,
-        "source": body.source,
-        "org_id": session["org_id"],
-    }
+        raise HTTPException(400, "Source tidak valid")
     if body.name is None and body.embedding and len(body.embedding) == 512:
-        row["embedding"] = body.embedding
-    supabase.table("detection_logs").insert(row).execute()
+        db_run(
+            "INSERT INTO detection_logs (name, similarity, det_score, source, org_id, embedding) "
+            "VALUES (%s, %s, %s, %s, %s::uuid, %s::vector)",
+            (body.name, body.similarity, body.det_score, body.source, session["org_id"], vec(body.embedding)),
+        )
+    else:
+        db_run(
+            "INSERT INTO detection_logs (name, similarity, det_score, source, org_id) "
+            "VALUES (%s, %s, %s, %s, %s::uuid)",
+            (body.name, body.similarity, body.det_score, body.source, session["org_id"]),
+        )
     return {"ok": True}
 
 
 @app.get("/api/logs")
 def list_logs(limit: int = 50, session: dict = Depends(get_session)):
     """Riwayat deteksi terbaru, urut dari yang paling baru."""
-    require_db()
     limit = max(1, min(limit, 200))
-    res = (
-        supabase.table("detection_logs")
-        .select("id, name, similarity, det_score, source, created_at, embedding")
-        .eq("org_id", session["org_id"])
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
+    rows = db_all(
+        "SELECT id, name, similarity, det_score, source, created_at, embedding::text AS embedding "
+        "FROM detection_logs WHERE org_id = %s::uuid ORDER BY created_at DESC LIMIT %s",
+        (session["org_id"], limit),
     )
-    return {"logs": res.data}
+    for r in rows:
+        r["id"] = str(r["id"])
+        if r.get("embedding"):
+            try:
+                r["embedding"] = json.loads(r["embedding"])
+            except Exception:
+                r["embedding"] = None
+    return {"logs": rows}
 
 
 DEFAULT_SETTINGS = {
@@ -386,10 +435,12 @@ class SettingsRequest(BaseModel):
 @app.get("/api/settings")
 def get_settings(session: dict = Depends(get_session)):
     """Ambil pengaturan sapaan untuk org ini."""
-    require_db()
-    res = supabase.table("app_settings").select("key, value").eq("org_id", session["org_id"]).execute()
+    rows = db_all(
+        "SELECT key, value FROM app_settings WHERE org_id = %s::uuid",
+        (session["org_id"],),
+    )
     settings = dict(DEFAULT_SETTINGS)
-    for row in res.data:
+    for row in rows:
         if row["key"] in settings:
             settings[row["key"]] = row["value"]
     return settings
@@ -397,31 +448,27 @@ def get_settings(session: dict = Depends(get_session)):
 
 @app.put("/api/settings")
 def update_settings(body: SettingsRequest, session: dict = Depends(get_session)):
-    """Perbarui pengaturan sapaan. Tersimpan per organisasi."""
-    require_db()
+    """Perbarui pengaturan sapaan."""
     org_id = session["org_id"]
     updates = body.model_dump(exclude_none=True)
     for key, value in updates.items():
-        supabase.table("app_settings").upsert(
-            {"org_id": org_id, "key": key, "value": value},
-            on_conflict="org_id,key",
-        ).execute()
+        db_run(
+            "INSERT INTO app_settings (org_id, key, value) VALUES (%s::uuid, %s, %s) "
+            "ON CONFLICT (org_id, key) DO UPDATE SET value = EXCLUDED.value",
+            (org_id, key, value),
+        )
     return get_settings(session)
 
 
 @app.get("/api/people")
 def list_people(session: dict = Depends(get_session)):
-    """Daftar orang terdaftar di org ini, dikelompokkan per nama."""
-    require_db()
-    res = (
-        supabase.table("faces")
-        .select("id, name, title, created_at")
-        .eq("org_id", session["org_id"])
-        .order("created_at", desc=True)
-        .execute()
+    """Daftar orang terdaftar, dikelompokkan per nama."""
+    rows = db_all(
+        "SELECT id, name, title, created_at FROM faces WHERE org_id = %s::uuid ORDER BY created_at DESC",
+        (session["org_id"],),
     )
     grouped: dict[str, dict] = {}
-    for row in res.data:
+    for row in rows:
         g = grouped.setdefault(row["name"], {
             "name": row["name"],
             "title": row.get("title", ""),
@@ -429,8 +476,8 @@ def list_people(session: dict = Depends(get_session)):
             "entries": [],
         })
         g["photos"] += 1
-        g["entries"].append({"id": row["id"], "created_at": row["created_at"]})
-    return {"total_entries": len(res.data), "people": list(grouped.values())}
+        g["entries"].append({"id": str(row["id"]), "created_at": row["created_at"]})
+    return {"total_entries": len(rows), "people": list(grouped.values())}
 
 
 class PersonUpdateRequest(BaseModel):
@@ -441,41 +488,45 @@ class PersonUpdateRequest(BaseModel):
 @app.patch("/api/people/{name}")
 def update_person(name: str, body: PersonUpdateRequest, session: dict = Depends(get_session)):
     """Ganti nama dan/atau gelar semua entri wajah milik satu orang."""
-    require_db()
-    update: dict = {}
+    sets = []
+    params: list = []
     if body.new_name is not None:
         new_name = body.new_name.strip()
         if not new_name:
-            raise HTTPException(status_code=400, detail="Nama tidak boleh kosong")
-        update["name"] = new_name
+            raise HTTPException(400, "Nama tidak boleh kosong")
+        sets.append("name = %s")
+        params.append(new_name)
     if body.title is not None:
         if body.title not in ("", "Bapak", "Ibu"):
-            raise HTTPException(status_code=400, detail="Gelar tidak valid")
-        update["title"] = body.title
-    if not update:
+            raise HTTPException(400, "Gelar tidak valid")
+        sets.append("title = %s")
+        params.append(body.title)
+    if not sets:
         return {"updated_entries": 0}
-    res = (
-        supabase.table("faces")
-        .update(update)
-        .eq("name", name)
-        .eq("org_id", session["org_id"])
-        .execute()
+    params.extend([name, session["org_id"]])
+    rows = db_run(
+        f"UPDATE faces SET {', '.join(sets)} WHERE name = %s AND org_id = %s::uuid RETURNING id",
+        tuple(params),
     )
-    return {"updated_entries": len(res.data or [])}
+    return {"updated_entries": len(rows)}
 
 
 @app.delete("/api/faces/{face_id}")
 def delete_face(face_id: str, session: dict = Depends(get_session)):
-    require_db()
-    supabase.table("faces").delete().eq("id", face_id).eq("org_id", session["org_id"]).execute()
+    db_run(
+        "DELETE FROM faces WHERE id = %s::uuid AND org_id = %s::uuid",
+        (face_id, session["org_id"]),
+    )
     return {"deleted": face_id}
 
 
 @app.delete("/api/people/{name}")
 def delete_person(name: str, session: dict = Depends(get_session)):
-    require_db()
-    res = supabase.table("faces").delete().eq("name", name).eq("org_id", session["org_id"]).execute()
-    return {"deleted_name": name, "deleted_entries": len(res.data or [])}
+    rows = db_run(
+        "DELETE FROM faces WHERE name = %s AND org_id = %s::uuid RETURNING id",
+        (name, session["org_id"]),
+    )
+    return {"deleted_name": name, "deleted_entries": len(rows)}
 
 
 # ----- Static UI -----
@@ -490,5 +541,4 @@ def index():
 
 @app.get("/sw.js")
 def service_worker():
-    # Disajikan dari root agar scope service worker mencakup seluruh app
     return FileResponse("static/sw.js", media_type="application/javascript")
