@@ -491,7 +491,7 @@ document.querySelectorAll("nav button").forEach((b) => {
     b.classList.add("active");
     $("#panel-" + b.dataset.tab).classList.add("active");
     if (b.dataset.tab === "db") loadPeople();
-    if (b.dataset.tab === "logs") loadLogs();
+    if (b.dataset.tab === "logs") { loadLogs(); startLogsAutoRefresh(); } else { stopLogsAutoRefresh(); }
     if (b.dataset.tab !== "realtime") stopRealtime();
     if (b.dataset.tab !== "guest") stopGuest();
   });
@@ -769,6 +769,17 @@ async function loadLogs() {
 }
 
 $("#logsRefreshBtn").addEventListener("click", loadLogs);
+
+let logsAutoRefresh = null;
+
+function startLogsAutoRefresh() {
+  if (logsAutoRefresh) return;
+  logsAutoRefresh = setInterval(loadLogs, 10000);
+}
+
+function stopLogsAutoRefresh() {
+  if (logsAutoRefresh) { clearInterval(logsAutoRefresh); logsAutoRefresh = null; }
+}
 
 function drawBoxes(faces) {
   const img = $("#idImg");
