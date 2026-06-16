@@ -988,6 +988,15 @@ $("#rtStopBtn").addEventListener("click", stopRealtime);
 let guestStream = null;
 let guestInterval = null;
 let guestBusy = false;
+let lastGuestSpoken = null;
+
+function speakGuestGreeting(text) {
+  if (!("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = "id-ID";
+  window.speechSynthesis.speak(utter);
+}
 
 async function startGuest() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -1032,6 +1041,7 @@ function stopGuest() {
   $("#guestCameraSelect").hidden = true;
   $("#guestStartBtn").hidden = false;
   $("#guestStopBtn").hidden = true;
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   resetGuestGreeting();
 }
 
@@ -1040,6 +1050,7 @@ function resetGuestGreeting() {
   el.className = "guest-greeting";
   el.querySelector(".guest-greeting-text").textContent = "Arahkan wajah ke kamera";
   el.querySelector(".guest-greeting-sub").textContent = "";
+  lastGuestSpoken = null;
 }
 
 async function captureGuest() {
@@ -1091,12 +1102,22 @@ function updateGuestGreeting(faces) {
 
   if (main.best) {
     el.className = "guest-greeting known";
-    text.textContent = greetingTemplates.greeting_known.replaceAll("{nama}", main.best.name);
+    const greeting = greetingTemplates.greeting_known.replaceAll("{nama}", main.best.name);
+    text.textContent = greeting;
     sub.textContent = `kemiripan ${(main.best.similarity * 100).toFixed(1)}%`;
+    const spokenKey = "known:" + main.best.name;
+    if (lastGuestSpoken !== spokenKey) {
+      lastGuestSpoken = spokenKey;
+      speakGuestGreeting(greeting);
+    }
   } else {
     el.className = "guest-greeting unknown";
     text.textContent = greetingTemplates.greeting_unknown;
     sub.textContent = "Silakan hubungi resepsionis untuk pendaftaran";
+    if (lastGuestSpoken !== "unknown") {
+      lastGuestSpoken = "unknown";
+      speakGuestGreeting(greetingTemplates.greeting_unknown);
+    }
   }
 }
 
