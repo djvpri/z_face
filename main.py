@@ -274,16 +274,41 @@ def list_people():
     require_db()
     res = (
         supabase.table("faces")
-        .select("id, name, created_at")
+        .select("id, name, title, created_at")
         .order("created_at", desc=True)
         .execute()
     )
     grouped: dict[str, dict] = {}
     for row in res.data:
-        g = grouped.setdefault(row["name"], {"name": row["name"], "photos": 0, "entries": []})
+        g = grouped.setdefault(row["name"], {"name": row["name"], "title": row.get("title", ""), "photos": 0, "entries": []})
         g["photos"] += 1
         g["entries"].append({"id": row["id"], "created_at": row["created_at"]})
     return {"total_entries": len(res.data), "people": list(grouped.values())}
+
+
+class PersonUpdateRequest(BaseModel):
+    new_name: str | None = None
+    title: str | None = None
+
+
+@app.patch("/api/people/{name}")
+def update_person(name: str, body: PersonUpdateRequest):
+    """Ganti nama dan/atau gelar semua entri wajah milik satu orang."""
+    require_db()
+    update: dict = {}
+    if body.new_name is not None:
+        new_name = body.new_name.strip()
+        if not new_name:
+            raise HTTPException(status_code=400, detail="Nama tidak boleh kosong")
+        update["name"] = new_name
+    if body.title is not None:
+        if body.title not in ("", "Bapak", "Ibu"):
+            raise HTTPException(status_code=400, detail="Gelar tidak valid")
+        update["title"] = body.title
+    if not update:
+        return {"updated_entries": 0}
+    res = supabase.table("faces").update(update).eq("name", name).execute()
+    return {"updated_entries": len(res.data or [])}
 
 
 @app.delete("/api/faces/{face_id}")

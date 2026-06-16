@@ -177,6 +177,21 @@
     color: var(--nomatch); cursor: pointer;
   }
   .person-row button:hover { border-color: var(--nomatch); }
+  .person-row .btn-edit { color: var(--muted); }
+  .person-row .btn-edit:hover { color: var(--fg); border-color: var(--muted); }
+  .person-row .btn-save { color: var(--match); border-color: var(--match); }
+  .person-row .btn-save:hover { background: var(--match); color: #fff; }
+  .person-row .btn-cancel { color: var(--muted); }
+  .person-edit { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .person-edit select, .person-edit input[type=text] {
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+    font-family: var(--mono); font-size: 0.78rem; background: var(--bg); color: var(--fg);
+  }
+  .person-edit input[type=text] { width: 160px; }
+  .person-title-badge {
+    font-family: var(--mono); font-size: 0.7rem; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; margin-right: 4px;
+  }
 
   .log-row {
     display: flex; justify-content: space-between; align-items: center;
@@ -1015,6 +1030,13 @@ async function startGuest() {
     return;
   }
   $("#guestMsg").className = "msg";
+  // Muat/perbarui cache gelar sebelum mode dimulai
+  try {
+    const r = await fetch("/api/people");
+    const d = await r.json();
+    peopleCache = {};
+    d.people.forEach((p) => { peopleCache[p.name] = p.title || ""; });
+  } catch { /* cache lama tetap dipakai */ }
 
   try {
     guestStream = await getCameraStream();
@@ -1113,7 +1135,9 @@ function updateGuestGreeting(faces) {
 
   if (main.best) {
     el.className = "guest-greeting known";
-    const greeting = greetingTemplates.greeting_known.replaceAll("{nama}", main.best.name);
+    const title = peopleCache[main.best.name] || "";
+    const displayName = title ? title + " " + main.best.name : main.best.name;
+    const greeting = greetingTemplates.greeting_known.replaceAll("{nama}", displayName);
     text.textContent = greeting;
     sub.textContent = `kemiripan ${(main.best.similarity * 100).toFixed(1)}%`;
     const spokenKey = "known:" + main.best.name;
@@ -1136,6 +1160,8 @@ $("#guestStartBtn").addEventListener("click", startGuest);
 $("#guestStopBtn").addEventListener("click", stopGuest);
 
 // ---------- Database ----------
+let peopleCache = {}; // name → title, untuk TAMU mode
+
 async function loadPeople() {
   const box = $("#peopleList");
   box.innerHTML = '<div class="empty">Memuat…</div>';
@@ -1146,22 +1172,73 @@ async function loadPeople() {
       box.innerHTML = '<div class="empty">Belum ada wajah terdaftar. Buka tab DAFTARKAN untuk memulai.</div>';
       return;
     }
-    box.innerHTML = d.people.map((p) => `
-      <div class="person-row">
-        <div><b>${p.name}</b><div class="meta">${p.photos} foto terdaftar</div></div>
-        <button data-name="${encodeURIComponent(p.name)}">Hapus</button>
-      </div>`).join("");
-    box.querySelectorAll("button").forEach((b) =>
-      b.addEventListener("click", async () => {
-        const nama = decodeURIComponent(b.dataset.name);
-        if (!confirm(`Hapus semua data wajah "${nama}"?`)) return;
-        await fetch("/api/people/" + b.dataset.name, { method: "DELETE" });
-        loadPeople();
-      })
-    );
+    // Perbarui cache gelar untuk mode TAMU
+    peopleCache = {};
+    d.people.forEach((p) => { peopleCache[p.name] = p.title || ""; });
+
+    box.innerHTML = d.people.map((p) => {
+      const enc = encodeURIComponent(p.name);
+      const badge = p.title ? `<span class="person-title-badge">${p.title}</span>` : "";
+      return `<div class="person-row" data-name="${enc}">
+        <div class="person-display">
+          <div>${badge}<b>${p.name}</b></div>
+          <div class="meta">${p.photos} foto terdaftar</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn-edit" data-action="edit" data-name="${enc}" data-title="${p.title || ""}">Edit</button>
+          <button data-action="hapus" data-name="${enc}">Hapus</button>
+        </div>
+      </div>`;
+    }).join("");
+
+    box.querySelectorAll("button").forEach((b) => {
+      b.addEventListener("click", () => {
+        const name = decodeURIComponent(b.dataset.name);
+        if (b.dataset.action === "hapus") {
+          if (!confirm(`Hapus semua data wajah "${name}"?`)) return;
+          fetch("/api/people/" + b.dataset.name, { method: "DELETE" }).then(loadPeople);
+        } else if (b.dataset.action === "edit") {
+          openEditPerson(b.closest(".person-row"), name, b.dataset.title);
+        }
+      });
+    });
   } catch {
     box.innerHTML = '<div class="empty">Gagal memuat data. Periksa koneksi Supabase.</div>';
   }
+}
+
+function openEditPerson(row, name, currentTitle) {
+  const display = row.querySelector(".person-display");
+  const actions = row.querySelector("div[style]");
+  display.innerHTML = `<div class="person-edit">
+    <select class="edit-title">
+      <option value="" ${!currentTitle ? "selected" : ""}>Tanpa gelar</option>
+      <option value="Bapak" ${currentTitle === "Bapak" ? "selected" : ""}>Bapak</option>
+      <option value="Ibu" ${currentTitle === "Ibu" ? "selected" : ""}>Ibu</option>
+    </select>
+    <input type="text" class="edit-name" value="${name}">
+  </div>`;
+  actions.innerHTML = `
+    <button class="btn-save" data-action="save">Simpan</button>
+    <button class="btn-cancel" data-action="cancel">Batal</button>`;
+  actions.querySelectorAll("button").forEach((b) => {
+    b.addEventListener("click", async () => {
+      if (b.dataset.action === "cancel") { loadPeople(); return; }
+      const newName = display.querySelector(".edit-name").value.trim();
+      const newTitle = display.querySelector(".edit-title").value;
+      if (!newName) { alert("Nama tidak boleh kosong"); return; }
+      b.disabled = true; b.textContent = "…";
+      try {
+        const res = await fetch("/api/people/" + encodeURIComponent(name), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ new_name: newName, title: newTitle }),
+        });
+        if (!res.ok) { const e = await res.json(); alert(e.detail || "Gagal menyimpan"); return; }
+        loadPeople();
+      } catch { alert("Gagal menyimpan, periksa koneksi."); b.disabled = false; b.textContent = "Simpan"; }
+    });
+  });
 }
 
 // ---------- PWA ----------
