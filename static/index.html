@@ -375,6 +375,12 @@ document.querySelectorAll("nav button").forEach((b) => {
   });
 });
 
+// Pancing Chrome agar memuat daftar suara TTS sedini mungkin
+if ("speechSynthesis" in window) {
+  window.speechSynthesis.getVoices();
+  window.speechSynthesis.addEventListener("voiceschanged", () => window.speechSynthesis.getVoices());
+}
+
 // ---------- Health ----------
 fetch("/api/health").then((r) => r.json()).then((d) => {
   $("#health").innerHTML = `model <b>${d.model}</b> · database <b>${d.database}</b>`;
@@ -993,9 +999,15 @@ let lastGuestSpoken = null;
 function speakGuestGreeting(text) {
   if (!("speechSynthesis" in window)) return;
   window.speechSynthesis.cancel();
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = "id-ID";
-  window.speechSynthesis.speak(utter);
+  // Chrome needs a brief gap after cancel() before speak() works reliably
+  setTimeout(() => {
+    const utter = new SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+    const idVoice = voices.find((v) => v.lang.startsWith("id"));
+    if (idVoice) utter.voice = idVoice;
+    // fall back to system default voice if no Indonesian voice installed
+    window.speechSynthesis.speak(utter);
+  }, 50);
 }
 
 async function startGuest() {
