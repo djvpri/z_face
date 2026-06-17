@@ -405,6 +405,8 @@
           </div>
         </div>
         <select id="guestCameraSelect" hidden></select>
+        <label>Threshold kemiripan: <span id="guestThVal">0.40</span></label>
+        <input type="range" id="guestThreshold" min="0.30" max="0.60" step="0.01" value="0.40">
         <button class="btn" id="guestStartBtn" type="button">MULAI MODE TAMU</button>
         <button class="btn secondary" id="guestStopBtn" type="button" hidden>HENTIKAN</button>
         <div class="msg" id="guestMsg"></div>
@@ -1416,6 +1418,8 @@ $("#guestCameraSelect").addEventListener("change", async () => {
   }
 });
 
+$("#guestThreshold").addEventListener("input", (e) => { $("#guestThVal").textContent = e.target.value; });
+
 function stopGuest() {
   if (guestInterval) { clearInterval(guestInterval); guestInterval = null; }
   if (guestStream) { guestStream.getTracks().forEach((t) => t.stop()); guestStream = null; }
@@ -1451,7 +1455,7 @@ async function captureGuest() {
 
     const fd = new FormData();
     fd.append("file", new File([blob], "guest.jpg", { type: "image/jpeg" }));
-    fd.append("threshold", "0.40");
+    fd.append("threshold", $("#guestThreshold").value);
 
     const r = await apiFetch("/api/identify", { method: "POST", body: fd });
     const d = await r.json();
