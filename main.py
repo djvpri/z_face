@@ -509,7 +509,7 @@ def update_settings(body: SettingsRequest, session: dict = Depends(get_session))
 def list_people(session: dict = Depends(get_session)):
     """Daftar orang terdaftar, dikelompokkan per nama."""
     rows = db_all(
-        "SELECT id, name, title, created_at FROM faces WHERE org_id = %s::uuid ORDER BY created_at DESC",
+        "SELECT id, name, title, greet_exempt, created_at FROM faces WHERE org_id = %s::uuid ORDER BY created_at DESC",
         (session["org_id"],),
     )
     grouped: dict[str, dict] = {}
@@ -517,6 +517,7 @@ def list_people(session: dict = Depends(get_session)):
         g = grouped.setdefault(row["name"], {
             "name": row["name"],
             "title": row.get("title", ""),
+            "greet_exempt": bool(row.get("greet_exempt", False)),
             "photos": 0,
             "entries": [],
         })
@@ -528,11 +529,12 @@ def list_people(session: dict = Depends(get_session)):
 class PersonUpdateRequest(BaseModel):
     new_name: str | None = None
     title: str | None = None
+    greet_exempt: bool | None = None
 
 
 @app.patch("/api/people/{name}")
 def update_person(name: str, body: PersonUpdateRequest, session: dict = Depends(get_session)):
-    """Ganti nama dan/atau gelar semua entri wajah milik satu orang."""
+    """Ganti nama, gelar, dan/atau status pengecualian sapaan satu orang."""
     sets = []
     params: list = []
     if body.new_name is not None:
@@ -546,6 +548,9 @@ def update_person(name: str, body: PersonUpdateRequest, session: dict = Depends(
             raise HTTPException(400, "Gelar tidak valid")
         sets.append("title = %s")
         params.append(body.title)
+    if body.greet_exempt is not None:
+        sets.append("greet_exempt = %s")
+        params.append(body.greet_exempt)
     if not sets:
         return {"updated_entries": 0}
     params.extend([name, session["org_id"]])

@@ -1382,12 +1382,12 @@ async function startGuest() {
     return;
   }
   $("#guestMsg").className = "msg";
-  // Muat/perbarui cache gelar sebelum mode dimulai
+  // Muat/perbarui cache gelar + pengecualian sapaan sebelum mode dimulai
   try {
     const r = await apiFetch("/api/people");
     const d = await r.json();
     peopleCache = {};
-    d.people.forEach((p) => { peopleCache[p.name] = p.title || ""; });
+    d.people.forEach((p) => { peopleCache[p.name] = { title: p.title || "", exempt: !!p.greet_exempt }; });
   } catch { /* cache lama tetap dipakai */ }
 
   try {
@@ -1472,12 +1472,19 @@ async function captureGuest() {
 }
 
 function updateGuestGreeting(faces) {
-  if (!faces.length) {
+  // Abaikan wajah yang dikenal tapi ditandai "tidak disapa" (mis. karyawan),
+  // supaya yang disapa hanya tamu/nasabah.
+  const candidates = faces.filter((f) => {
+    if (f.best && peopleCache[f.best.name] && peopleCache[f.best.name].exempt) return false;
+    return true;
+  });
+
+  if (!candidates.length) {
     resetGuestGreeting();
     return;
   }
 
-  const main = faces.reduce((a, b) => {
+  const main = candidates.reduce((a, b) => {
     const areaA = (a.bbox.x2 - a.bbox.x1) * (a.bbox.y2 - a.bbox.y1);
     const areaB = (b.bbox.x2 - b.bbox.x1) * (b.bbox.y2 - b.bbox.y1);
     return areaB > areaA ? b : a;
@@ -1489,7 +1496,7 @@ function updateGuestGreeting(faces) {
 
   if (main.best) {
     el.className = "guest-greeting known";
-    const title = peopleCache[main.best.name] || "";
+    const title = (peopleCache[main.best.name] && peopleCache[main.best.name].title) || "";
     const displayName = title ? title + " " + main.best.name : main.best.name;
     const greeting = greetingTemplates.greeting_known.replaceAll("{nama}", displayName);
     text.textContent = greeting;
@@ -1514,7 +1521,7 @@ $("#guestStartBtn").addEventListener("click", startGuest);
 $("#guestStopBtn").addEventListener("click", stopGuest);
 
 // ---------- Database ----------
-let peopleCache = {}; // name → title, untuk TAMU mode
+let peopleCache = {}; // name → {title, exempt}, untuk TAMU mode
 
 async function loadPeople() {
   const box = $("#peopleList");
@@ -1526,20 +1533,21 @@ async function loadPeople() {
       box.innerHTML = '<div class="empty">Belum ada wajah terdaftar. Buka tab DAFTARKAN untuk memulai.</div>';
       return;
     }
-    // Perbarui cache gelar untuk mode TAMU
+    // Perbarui cache gelar + pengecualian sapaan untuk mode TAMU
     peopleCache = {};
-    d.people.forEach((p) => { peopleCache[p.name] = p.title || ""; });
+    d.people.forEach((p) => { peopleCache[p.name] = { title: p.title || "", exempt: !!p.greet_exempt }; });
 
     box.innerHTML = d.people.map((p) => {
       const enc = encodeURIComponent(p.name);
       const badge = p.title ? `<span class="person-title-badge">${p.title}</span>` : "";
+      const exBadge = p.greet_exempt ? `<span class="person-title-badge" style="color:var(--nomatch)">tidak disapa</span>` : "";
       return `<div class="person-row" data-name="${enc}">
         <div class="person-display">
-          <div>${badge}<b>${p.name}</b></div>
+          <div>${badge}${exBadge}<b>${p.name}</b></div>
           <div class="meta">${p.photos} foto terdaftar</div>
         </div>
         <div style="display:flex;gap:6px">
-          <button class="btn-edit" data-action="edit" data-name="${enc}" data-title="${p.title || ""}">Edit</button>
+          <button class="btn-edit" data-action="edit" data-name="${enc}" data-title="${p.title || ""}" data-exempt="${p.greet_exempt ? "1" : ""}">Edit</button>
           <button data-action="hapus" data-name="${enc}">Hapus</button>
         </div>
       </div>`;
@@ -1552,7 +1560,7 @@ async function loadPeople() {
           if (!confirm(`Hapus semua data wajah "${name}"?`)) return;
           apiFetch("/api/people/" + b.dataset.name, { method: "DELETE" }).then(loadPeople).catch(() => {});
         } else if (b.dataset.action === "edit") {
-          openEditPerson(b.closest(".person-row"), name, b.dataset.title);
+          openEditPerson(b.closest(".person-row"), name, b.dataset.title, b.dataset.exempt === "1");
         }
       });
     });
@@ -1561,7 +1569,7 @@ async function loadPeople() {
   }
 }
 
-function openEditPerson(row, name, currentTitle) {
+function openEditPerson(row, name, currentTitle, currentExempt) {
   const display = row.querySelector(".person-display");
   const actions = row.querySelector("div[style]");
   display.innerHTML = `<div class="person-edit">
@@ -1571,6 +1579,9 @@ function openEditPerson(row, name, currentTitle) {
       <option value="Ibu" ${currentTitle === "Ibu" ? "selected" : ""}>Ibu</option>
     </select>
     <input type="text" class="edit-name" value="${name}">
+    <label style="display:flex;align-items:center;gap:6px;margin:0;font-family:var(--mono);font-size:0.72rem;color:var(--muted);cursor:pointer">
+      <input type="checkbox" class="edit-exempt" ${currentExempt ? "checked" : ""} style="width:auto;margin:0"> tidak disapa di mode TAMU
+    </label>
   </div>`;
   actions.innerHTML = `
     <button class="btn-save" data-action="save">Simpan</button>
@@ -1580,13 +1591,14 @@ function openEditPerson(row, name, currentTitle) {
       if (b.dataset.action === "cancel") { loadPeople(); return; }
       const newName = display.querySelector(".edit-name").value.trim();
       const newTitle = display.querySelector(".edit-title").value;
+      const newExempt = display.querySelector(".edit-exempt").checked;
       if (!newName) { alert("Nama tidak boleh kosong"); return; }
       b.disabled = true; b.textContent = "…";
       try {
         const res = await apiFetch("/api/people/" + encodeURIComponent(name), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ new_name: newName, title: newTitle }),
+          body: JSON.stringify({ new_name: newName, title: newTitle, greet_exempt: newExempt }),
         });
         if (!res.ok) { const e = await res.json(); alert(e.detail || "Gagal menyimpan"); return; }
         loadPeople();

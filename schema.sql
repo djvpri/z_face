@@ -30,12 +30,13 @@ CREATE TABLE IF NOT EXISTS org_members (
 );
 
 CREATE TABLE IF NOT EXISTS faces (
-    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name       TEXT NOT NULL,
-    title      TEXT DEFAULT '',
-    embedding  vector(512),
-    org_id     UUID REFERENCES organizations(id) ON DELETE CASCADE,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name         TEXT NOT NULL,
+    title        TEXT DEFAULT '',
+    greet_exempt BOOLEAN NOT NULL DEFAULT FALSE,
+    embedding    vector(512),
+    org_id       UUID REFERENCES organizations(id) ON DELETE CASCADE,
+    created_at   TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS detection_logs (
