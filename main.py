@@ -682,6 +682,11 @@ def index():
     return FileResponse("static/index.html")
 
 
+@app.get("/admin")
+def admin_page():
+    return FileResponse("static/admin.html")
+
+
 @app.get("/sw.js")
 def service_worker():
     return FileResponse("static/sw.js", media_type="application/javascript")

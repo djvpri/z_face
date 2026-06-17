@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZFace — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #E9EDF1; --surface: #FFFFFF; --ink: #16202B; --muted: #5C6B7A;
+    --line: #D3DAE1; --accent: #0E6E66; --accent-soft: #DCEEEB;
+    --match: #176B3A; --nomatch: #9A4A12;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+    --display: "Bricolage Grotesque", system-ui, sans-serif;
+    --body: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--body); min-height: 100vh; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 28px 20px 64px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
+  h1 { font-family: var(--display); font-weight: 700; font-size: 1.7rem; letter-spacing: -0.02em; }
+  h1 span { color: var(--accent); }
+  .tagline { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); }
+
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-bottom: 18px; }
+  .eyebrow { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; }
+  label { display: block; font-family: var(--mono); font-size: 0.72rem; color: var(--muted); margin: 12px 0 6px; }
+  input[type=text], input[type=email], input[type=password], input[type=number], select {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+    font-size: 0.95rem; font-family: var(--body); background: var(--bg); color: var(--ink);
+  }
+  select { font-family: var(--mono); font-size: 0.85rem; }
+  input:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row > div { flex: 1; min-width: 140px; }
+  .btn {
+    margin-top: 16px; width: 100%; padding: 12px; border: none; border-radius: 8px;
+    background: var(--accent); color: #fff; font-family: var(--mono); font-size: 0.85rem;
+    font-weight: 600; letter-spacing: 0.05em; cursor: pointer;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:disabled { background: var(--line); color: var(--muted); cursor: not-allowed; }
+  .btn.secondary { background: var(--surface); color: var(--accent); border: 1px solid var(--accent); }
+  .btn.secondary:hover { background: var(--accent-soft); }
+  .msg { margin-top: 12px; font-size: 0.85rem; padding: 10px 12px; border-radius: 8px; display: none; }
+  .msg.ok { display: block; background: var(--accent-soft); color: var(--accent); }
+  .msg.err { display: block; background: #F6E3D7; color: var(--nomatch); }
+  .empty { color: var(--muted); font-size: 0.88rem; padding: 12px 0; }
+
+  .org-row { padding: 10px 4px; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
+  .org-row b { font-weight: 600; }
+  .org-row .meta { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+  .org-row .meta .id { user-select: all; }
+
+  #gate { position: fixed; inset: 0; z-index: 100; background: rgba(14,25,35,0.93); display: flex; align-items: center; justify-content: center; padding: 20px; }
+  #gate.hidden { display: none; }
+  .gate-box { background: var(--surface); border-radius: 16px; padding: 36px; width: 100%; max-width: 380px; box-shadow: 0 8px 48px rgba(0,0,0,0.45); }
+  .gate-box h2 { font-family: var(--display); font-size: 1.5rem; margin-bottom: 6px; }
+  .gate-box .sub { color: var(--muted); font-size: 0.85rem; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="gate-box">
+    <h2>ZFace <span style="color:var(--accent)">Admin</span></h2>
+    <p class="sub">Masukkan Admin Key untuk lanjut</p>
+    <label for="keyInput">ADMIN KEY</label>
+    <input type="password" id="keyInput" placeholder="••••••••" autocomplete="off">
+    <button class="btn" id="keyBtn" type="button">MASUK</button>
+    <div class="msg" id="keyMsg"></div>
+  </div>
+</div>
+
+<div class="wrap">
+  <header>
+    <h1>ZFace <span>Admin</span></h1>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <span class="tagline">panel kelola organisasi &amp; user</span>
+      <button class="btn secondary" id="lockBtn" type="button" style="margin:0;padding:6px 14px;font-size:0.7rem;width:auto;">KUNCI</button>
+    </div>
+  </header>
+
+  <!-- Buat organisasi -->
+  <div class="card">
+    <div class="eyebrow">Buat Organisasi Baru</div>
+    <label for="orgName">Nama organisasi</label>
+    <input type="text" id="orgName" placeholder="BPR Sejahtera">
+    <div class="row">
+      <div>
+        <label for="orgPlan">Plan</label>
+        <select id="orgPlan">
+          <option value="starter">starter</option>
+          <option value="pro">pro</option>
+          <option value="enterprise">enterprise</option>
+        </select>
+      </div>
+      <div>
+        <label for="orgQuota">Kuota wajah</label>
+        <input type="number" id="orgQuota" value="500" min="1">
+      </div>
+    </div>
+    <button class="btn" id="orgBtn" type="button">BUAT ORGANISASI</button>
+    <div class="msg" id="orgMsg"></div>
+  </div>
+
+  <!-- Daftar organisasi -->
+  <div class="card">
+    <div class="eyebrow">Daftar Organisasi</div>
+    <div id="orgList"><div class="empty">Memuat…</div></div>
+    <button class="btn secondary" id="orgRefreshBtn" type="button">MUAT ULANG</button>
+  </div>
+
+  <!-- Buat user -->
+  <div class="card">
+    <div class="eyebrow">Buat User Baru</div>
+    <label for="userEmail">Email</label>
+    <input type="email" id="userEmail" placeholder="teller@bpr.com" autocomplete="off">
+    <label for="userPass">Password</label>
+    <input type="password" id="userPass" placeholder="minimal 6 karakter" autocomplete="new-password">
+    <div class="row">
+      <div>
+        <label for="userOrg">Organisasi</label>
+        <select id="userOrg"></select>
+      </div>
+      <div>
+        <label for="userRole">Role</label>
+        <select id="userRole">
+          <option value="owner">owner</option>
+          <option value="admin">admin</option>
+          <option value="member" selected>member</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn" id="userBtn" type="button">BUAT USER</button>
+    <div class="msg" id="userMsg"></div>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let adminKey = localStorage.getItem("zface_admin_key") || "";
+
+function adminFetch(url, opts = {}) {
+  const headers = Object.assign({ "X-Admin-Key": adminKey }, opts.headers || {});
+  return fetch(url, Object.assign({}, opts, { headers }));
+}
+
+function showMsg(el, text, type) { el.textContent = text; el.className = "msg " + type; }
+
+// ---- Gate ----
+async function tryUnlock(key) {
+  adminKey = key;
+  const r = await adminFetch("/api/admin/organizations");
+  if (r.status === 403) return false;
+  if (!r.ok) throw new Error("Server error");
+  return true;
+}
+
+$("#keyBtn").addEventListener("click", async () => {
+  const key = $("#keyInput").value.trim();
+  if (!key) { showMsg($("#keyMsg"), "Isi admin key dulu", "err"); return; }
+  $("#keyBtn").disabled = true; $("#keyBtn").textContent = "MEMERIKSA…";
+  try {
+    if (await tryUnlock(key)) {
+      localStorage.setItem("zface_admin_key", key);
+      $("#gate").classList.add("hidden");
+      loadOrgs();
+    } else {
+      showMsg($("#keyMsg"), "Admin key salah", "err");
+    }
+  } catch { showMsg($("#keyMsg"), "Tidak dapat terhubung ke server", "err"); }
+  finally { $("#keyBtn").disabled = false; $("#keyBtn").textContent = "MASUK"; }
+});
+
+$("#keyInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#keyBtn").click(); });
+
+$("#lockBtn").addEventListener("click", () => {
+  localStorage.removeItem("zface_admin_key");
+  adminKey = "";
+  $("#keyInput").value = "";
+  $("#gate").classList.remove("hidden");
+});
+
+// ---- Organisasi ----
+async function loadOrgs() {
+  const box = $("#orgList");
+  box.innerHTML = '<div class="empty">Memuat…</div>';
+  try {
+    const r = await adminFetch("/api/admin/organizations");
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Gagal memuat");
+    const sel = $("#userOrg");
+    sel.innerHTML = "";
+    if (!d.organizations.length) {
+      box.innerHTML = '<div class="empty">Belum ada organisasi.</div>';
+      return;
+    }
+    box.innerHTML = d.organizations.map((o) => `
+      <div class="org-row">
+        <b>${o.name}</b>
+        <div class="meta">${o.plan} · kuota ${o.quota_faces} · <span class="id">${o.id}</span></div>
+      </div>`).join("");
+    d.organizations.forEach((o) => {
+      const opt = document.createElement("option");
+      opt.value = o.id; opt.textContent = o.name;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    box.innerHTML = '<div class="empty">Gagal memuat organisasi.</div>';
+  }
+}
+
+$("#orgRefreshBtn").addEventListener("click", loadOrgs);
+
+$("#orgBtn").addEventListener("click", async () => {
+  const name = $("#orgName").value.trim();
+  if (!name) { showMsg($("#orgMsg"), "Nama organisasi wajib diisi", "err"); return; }
+  const btn = $("#orgBtn"); btn.disabled = true; btn.textContent = "MENYIMPAN…";
+  try {
+    const r = await adminFetch("/api/admin/organizations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        plan: $("#orgPlan").value,
+        quota_faces: parseInt($("#orgQuota").value, 10) || 500,
+      }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Gagal membuat organisasi");
+    showMsg($("#orgMsg"), `Organisasi "${name}" dibuat.`, "ok");
+    $("#orgName").value = "";
+    loadOrgs();
+  } catch (e) { showMsg($("#orgMsg"), e.message, "err"); }
+  finally { btn.disabled = false; btn.textContent = "BUAT ORGANISASI"; }
+});
+
+// ---- User ----
+$("#userBtn").addEventListener("click", async () => {
+  const email = $("#userEmail").value.trim();
+  const password = $("#userPass").value;
+  const org_id = $("#userOrg").value;
+  if (!email || !password) { showMsg($("#userMsg"), "Email dan password wajib diisi", "err"); return; }
+  if (!org_id) { showMsg($("#userMsg"), "Pilih organisasi dulu (buat organisasi jika belum ada)", "err"); return; }
+  const btn = $("#userBtn"); btn.disabled = true; btn.textContent = "MENYIMPAN…";
+  try {
+    const r = await adminFetch("/api/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, org_id, role: $("#userRole").value }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Gagal membuat user");
+    showMsg($("#userMsg"), `User ${email} dibuat sebagai ${d.role}.`, "ok");
+    $("#userEmail").value = ""; $("#userPass").value = "";
+  } catch (e) { showMsg($("#userMsg"), e.message, "err"); }
+  finally { btn.disabled = false; btn.textContent = "BUAT USER"; }
+});
+
+// ---- Init ----
+(async () => {
+  if (adminKey) {
+    try {
+      if (await tryUnlock(adminKey)) { $("#gate").classList.add("hidden"); loadOrgs(); return; }
+    } catch {}
+  }
+  $("#gate").classList.remove("hidden");
+})();
+</script>
+</body>
+</html>
