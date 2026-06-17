@@ -439,6 +439,8 @@
   <section class="panel" id="panel-db">
     <div class="card">
       <div class="eyebrow">Orang terdaftar</div>
+      <input type="text" id="peopleSearch" placeholder="Cari nama…" autocomplete="off" style="margin-bottom:6px">
+      <div id="peopleCount" class="meta" style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);margin-bottom:10px;"></div>
       <div id="peopleList"><div class="empty">Memuat…</div></div>
     </div>
   </section>
@@ -1523,51 +1525,73 @@ $("#guestStopBtn").addEventListener("click", stopGuest);
 // ---------- Database ----------
 let peopleCache = {}; // name → {title, exempt}, untuk TAMU mode
 
+let allPeople = [];
+
 async function loadPeople() {
   const box = $("#peopleList");
   box.innerHTML = '<div class="empty">Memuat…</div>';
   try {
     const r = await apiFetch("/api/people");
     const d = await r.json();
-    if (!d.people.length) {
+    allPeople = d.people || [];
+    // Perbarui cache gelar + pengecualian sapaan untuk mode TAMU
+    peopleCache = {};
+    allPeople.forEach((p) => { peopleCache[p.name] = { title: p.title || "", exempt: !!p.greet_exempt }; });
+    if (!allPeople.length) {
+      $("#peopleCount").textContent = "";
       box.innerHTML = '<div class="empty">Belum ada wajah terdaftar. Buka tab DAFTARKAN untuk memulai.</div>';
       return;
     }
-    // Perbarui cache gelar + pengecualian sapaan untuk mode TAMU
-    peopleCache = {};
-    d.people.forEach((p) => { peopleCache[p.name] = { title: p.title || "", exempt: !!p.greet_exempt }; });
-
-    box.innerHTML = d.people.map((p) => {
-      const enc = encodeURIComponent(p.name);
-      const badge = p.title ? `<span class="person-title-badge">${p.title}</span>` : "";
-      const exBadge = p.greet_exempt ? `<span class="person-title-badge" style="color:var(--nomatch)">tidak disapa</span>` : "";
-      return `<div class="person-row" data-name="${enc}">
-        <div class="person-display">
-          <div>${badge}${exBadge}<b>${p.name}</b></div>
-          <div class="meta">${p.photos} foto terdaftar</div>
-        </div>
-        <div style="display:flex;gap:6px">
-          <button class="btn-edit" data-action="edit" data-name="${enc}" data-title="${p.title || ""}" data-exempt="${p.greet_exempt ? "1" : ""}">Edit</button>
-          <button data-action="hapus" data-name="${enc}">Hapus</button>
-        </div>
-      </div>`;
-    }).join("");
-
-    box.querySelectorAll("button").forEach((b) => {
-      b.addEventListener("click", () => {
-        const name = decodeURIComponent(b.dataset.name);
-        if (b.dataset.action === "hapus") {
-          if (!confirm(`Hapus semua data wajah "${name}"?`)) return;
-          apiFetch("/api/people/" + b.dataset.name, { method: "DELETE" }).then(loadPeople).catch(() => {});
-        } else if (b.dataset.action === "edit") {
-          openEditPerson(b.closest(".person-row"), name, b.dataset.title, b.dataset.exempt === "1");
-        }
-      });
-    });
+    renderPeople($("#peopleSearch").value);
   } catch {
     box.innerHTML = '<div class="empty">Gagal memuat data. Periksa koneksi Supabase.</div>';
   }
 }
+
+function renderPeople(term) {
+  const box = $("#peopleList");
+  const q = (term || "").trim().toLowerCase();
+  const list = q ? allPeople.filter((p) => p.name.toLowerCase().includes(q)) : allPeople;
+
+  $("#peopleCount").textContent = q
+    ? `${list.length} dari ${allPeople.length} orang`
+    : `${allPeople.length} orang terdaftar`;
+
+  if (!list.length) {
+    box.innerHTML = `<div class="empty">Tidak ada nama yang cocok dengan "${term}".</div>`;
+    return;
+  }
+
+  box.innerHTML = list.map((p) => {
+    const enc = encodeURIComponent(p.name);
+    const badge = p.title ? `<span class="person-title-badge">${p.title}</span>` : "";
+    const exBadge = p.greet_exempt ? `<span class="person-title-badge" style="color:var(--nomatch)">tidak disapa</span>` : "";
+    return `<div class="person-row" data-name="${enc}">
+      <div class="person-display">
+        <div>${badge}${exBadge}<b>${p.name}</b></div>
+        <div class="meta">${p.photos} foto terdaftar</div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn-edit" data-action="edit" data-name="${enc}" data-title="${p.title || ""}" data-exempt="${p.greet_exempt ? "1" : ""}">Edit</button>
+        <button data-action="hapus" data-name="${enc}">Hapus</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  box.querySelectorAll("button").forEach((b) => {
+    b.addEventListener("click", () => {
+      const name = decodeURIComponent(b.dataset.name);
+      if (b.dataset.action === "hapus") {
+        if (!confirm(`Hapus semua data wajah "${name}"?`)) return;
+        apiFetch("/api/people/" + b.dataset.name, { method: "DELETE" }).then(loadPeople).catch(() => {});
+      } else if (b.dataset.action === "edit") {
+        openEditPerson(b.closest(".person-row"), name, b.dataset.title, b.dataset.exempt === "1");
+      }
+    });
+  });
+}
+
+$("#peopleSearch").addEventListener("input", (e) => renderPeople(e.target.value));
 
 function openEditPerson(row, name, currentTitle, currentExempt) {
   const display = row.querySelector(".person-display");
