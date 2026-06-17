@@ -292,13 +292,38 @@ async function loadMembers(orgId) {
     box.innerHTML = d.members.map((m) => `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);">
         <span class="meta">${m.email} · ${m.role}</span>
-        <button class="btn secondary member-cancel" data-org="${orgId}" data-uid="${m.user_id}" data-email="${m.email.replace(/"/g, "&quot;")}" type="button"
-          style="margin:0;width:auto;padding:4px 10px;font-size:0.66rem;color:var(--nomatch);border-color:var(--nomatch);">BATALKAN</button>
+        <span style="display:flex;gap:6px;">
+          <button class="btn secondary member-reset" data-uid="${m.user_id}" data-email="${m.email.replace(/"/g, "&quot;")}" type="button"
+            style="margin:0;width:auto;padding:4px 10px;font-size:0.66rem;">RESET PW</button>
+          <button class="btn secondary member-cancel" data-org="${orgId}" data-uid="${m.user_id}" data-email="${m.email.replace(/"/g, "&quot;")}" type="button"
+            style="margin:0;width:auto;padding:4px 10px;font-size:0.66rem;color:var(--nomatch);border-color:var(--nomatch);">BATALKAN</button>
+        </span>
       </div>`).join("");
     box.querySelectorAll(".member-cancel").forEach((b) => {
       b.addEventListener("click", () => cancelMember(b));
     });
+    box.querySelectorAll(".member-reset").forEach((b) => {
+      b.addEventListener("click", () => resetMemberPw(b));
+    });
   } catch (e) { box.innerHTML = `<div class="empty" style="padding:6px 0">${e.message}</div>`; }
+}
+
+async function resetMemberPw(btn) {
+  const np = prompt(`Password baru untuk "${btn.dataset.email}" (minimal 6 karakter):`);
+  if (np === null) return;
+  if (np.length < 6) { alert("Password minimal 6 karakter"); return; }
+  btn.disabled = true; btn.textContent = "…";
+  try {
+    const r = await adminFetch("/api/admin/users/" + btn.dataset.uid + "/reset-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_password: np }),
+    });
+    const d = await safeJson(r);
+    if (!r.ok) throw new Error(d.detail || "Gagal reset password");
+    alert(`Password ${btn.dataset.email} berhasil di-reset.`);
+  } catch (e) { alert(e.message); }
+  finally { btn.disabled = false; btn.textContent = "RESET PW"; }
 }
 
 async function cancelMember(btn) {

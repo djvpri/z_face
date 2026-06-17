@@ -237,13 +237,13 @@
   }
 
   /* Login / lock overlay */
-  #loginOverlay, #lockOverlay {
+  #loginOverlay, #lockOverlay, #pwOverlay {
     position: fixed; inset: 0; z-index: 1000;
     background: rgba(14,25,35,0.93);
     display: flex; align-items: center; justify-content: center;
     padding: 20px;
   }
-  #loginOverlay.hidden, #lockOverlay.hidden { display: none; }
+  #loginOverlay.hidden, #lockOverlay.hidden, #pwOverlay.hidden { display: none; }
   .login-box {
     background: var(--surface); border-radius: 16px; padding: 40px 36px;
     width: 100%; max-width: 380px;
@@ -279,12 +279,27 @@
   </div>
 </div>
 
+<div id="pwOverlay" class="hidden">
+  <div class="login-box">
+    <h2>Ganti <span style="color:var(--accent)">Password</span></h2>
+    <p class="sub">Masukkan password lama dan baru</p>
+    <label for="pwOld">PASSWORD LAMA</label>
+    <input type="password" id="pwOld" autocomplete="current-password">
+    <label for="pwNew">PASSWORD BARU</label>
+    <input type="password" id="pwNew" placeholder="minimal 6 karakter" autocomplete="new-password">
+    <button class="btn" id="pwSaveBtn" type="button">SIMPAN</button>
+    <button class="btn secondary" id="pwCancelBtn" type="button" style="margin-top:8px">BATAL</button>
+    <div class="msg" id="pwMsg"></div>
+  </div>
+</div>
+
 <div class="wrap">
   <header>
     <h1>Z<span>Face</span></h1>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
       <span id="orgBadge" style="font-family:var(--mono);font-size:0.72rem;color:var(--muted);"></span>
       <div id="health">memeriksa server…</div>
+      <button id="pwBtn" class="btn secondary" type="button" style="padding:6px 14px;font-size:0.7rem;width:auto;">GANTI PASSWORD</button>
       <button id="logoutBtn" class="btn secondary" type="button" style="padding:6px 14px;font-size:0.7rem;width:auto;">KELUAR</button>
     </div>
   </header>
@@ -342,6 +357,11 @@
         <input type="range" id="sigThreshold" min="0.40" max="0.85" step="0.01" value="0.55">
         <button class="btn" id="sigBtn" disabled>IDENTIFIKASI TANDA TANGAN</button>
         <div class="msg" id="sigMsg"></div>
+        <p style="font-size:.75rem;color:var(--muted);margin-top:10px;line-height:1.6;">
+          ⚠ Fitur ini alat bantu pencocokan tanda tangan, <b>bukan verifikasi resmi</b>.
+          Keputusan akhir tetap pada petugas. Jangan dijadikan satu-satunya dasar
+          pengesahan transaksi.
+        </p>
       </div>
       <div class="card">
         <div class="eyebrow">Hasil identifikasi</div>
@@ -587,6 +607,33 @@ $("#loginPassword").addEventListener("keydown", (e) => {
 
 $("#logoutBtn").addEventListener("click", logout);
 $("#lockLogoutBtn").addEventListener("click", logout);
+
+// ---------- Ganti password ----------
+$("#pwBtn").addEventListener("click", () => {
+  $("#pwOld").value = ""; $("#pwNew").value = "";
+  $("#pwMsg").className = "msg";
+  $("#pwOverlay").classList.remove("hidden");
+});
+$("#pwCancelBtn").addEventListener("click", () => $("#pwOverlay").classList.add("hidden"));
+$("#pwSaveBtn").addEventListener("click", async () => {
+  const oldp = $("#pwOld").value, newp = $("#pwNew").value;
+  const msg = $("#pwMsg");
+  if (!oldp || !newp) { msg.className = "msg err"; msg.textContent = "Isi kedua kolom"; return; }
+  if (newp.length < 6) { msg.className = "msg err"; msg.textContent = "Password baru minimal 6 karakter"; return; }
+  const btn = $("#pwSaveBtn"); btn.disabled = true; btn.textContent = "MENYIMPAN…";
+  try {
+    const r = await apiFetch("/api/auth/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ old_password: oldp, new_password: newp }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Gagal mengganti password");
+    msg.className = "msg ok"; msg.textContent = "Password berhasil diganti.";
+    setTimeout(() => $("#pwOverlay").classList.add("hidden"), 1200);
+  } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
+  finally { btn.disabled = false; btn.textContent = "SIMPAN"; }
+});
 
 initAuth();
 

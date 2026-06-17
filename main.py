@@ -367,6 +367,28 @@ def get_me(session: dict = Depends(get_session)):
     }
 
 
+MIN_PASSWORD_LEN = 6
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@app.post("/api/auth/change-password")
+def change_password(body: ChangePasswordRequest, session: dict = Depends(get_session)):
+    """User mengganti password sendiri (perlu password lama)."""
+    if len(body.new_password) < MIN_PASSWORD_LEN:
+        raise HTTPException(400, f"Password baru minimal {MIN_PASSWORD_LEN} karakter")
+    row = db_one("SELECT password_hash FROM users WHERE id = %s::uuid", (session["user_id"],))
+    if not row or not bcrypt.checkpw(body.old_password.encode(), row["password_hash"].encode()):
+        raise HTTPException(401, "Password lama salah")
+    new_hash = bcrypt.hashpw(body.new_password.encode(), bcrypt.gensalt()).decode()
+    db_run("UPDATE users SET password_hash = %s WHERE id = %s::uuid", (new_hash, session["user_id"]))
+    log_audit(session["user_id"], "change_password", "", session["org_id"])
+    return {"ok": True}
+
+
 # ----- Admin endpoints -----
 
 class OrgCreateRequest(BaseModel):
@@ -486,6 +508,8 @@ def admin_audit(limit: int = 100, _=Depends(require_admin)):
 def admin_create_user(body: UserCreateRequest, _=Depends(require_admin)):
     if body.role not in ("owner", "admin", "member"):
         raise HTTPException(400, "Role tidak valid. Pilih: owner, admin, member")
+    if len(body.password) < MIN_PASSWORD_LEN:
+        raise HTTPException(400, f"Password minimal {MIN_PASSWORD_LEN} karakter")
     pw_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode()
     try:
         rows = db_run(
@@ -534,6 +558,24 @@ def admin_cancel_member(org_id: str, user_id: str, _=Depends(require_admin)):
         user_deleted = True
     log_audit("admin", "cancel_member", row["email"], org_id)
     return {"cancelled": user_id, "email": row["email"], "user_deleted": user_deleted}
+
+
+class AdminResetPwRequest(BaseModel):
+    new_password: str
+
+
+@app.post("/api/admin/users/{user_id}/reset-password")
+def admin_reset_password(user_id: str, body: AdminResetPwRequest, _=Depends(require_admin)):
+    """Admin set ulang password user (mis. user lupa password)."""
+    if len(body.new_password) < MIN_PASSWORD_LEN:
+        raise HTTPException(400, f"Password minimal {MIN_PASSWORD_LEN} karakter")
+    row = db_one("SELECT email FROM users WHERE id = %s::uuid", (user_id,))
+    if not row:
+        raise HTTPException(404, "User tidak ditemukan")
+    new_hash = bcrypt.hashpw(body.new_password.encode(), bcrypt.gensalt()).decode()
+    db_run("UPDATE users SET password_hash = %s WHERE id = %s::uuid", (new_hash, user_id))
+    log_audit("admin", "reset_password", row["email"])
+    return {"ok": True, "email": row["email"]}
 
 
 # ----- Public endpoints -----
