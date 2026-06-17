@@ -194,14 +194,21 @@
   }
 
   .log-row {
-    display: flex; justify-content: space-between; align-items: center;
-    flex-wrap: wrap; gap: 8px;
+    display: flex; align-items: center; gap: 12px;
     padding: 10px 4px; border-bottom: 1px solid var(--line);
     font-size: 0.85rem;
   }
   .log-row .log-name { font-weight: 600; }
   .log-row .log-name.unknown { color: var(--nomatch); }
   .log-row .log-meta { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); }
+  .log-photo {
+    width: 52px; height: 52px; border-radius: 8px; object-fit: cover;
+    flex-shrink: 0; background: var(--bg); border: 1px solid var(--line);
+  }
+  .log-photo-empty {
+    width: 52px; height: 52px; border-radius: 8px; flex-shrink: 0;
+    background: var(--bg); border: 1px solid var(--line);
+  }
 
   .msg { margin-top: 12px; font-size: 0.85rem; padding: 10px 12px; border-radius: 8px; display: none; }
   .msg.ok { display: block; background: var(--accent-soft); color: var(--accent); }
@@ -628,7 +635,7 @@ $("#idBtn").addEventListener("click", async () => {
     lastFaces = d.faces;
     renderResults(d.faces);
     drawBoxes(d.faces);
-    logFaces(d.faces, "identify");
+    logFaces(d.faces, "identify", $("#idImg"));
   } catch (err) {
     showMsg($("#idMsg"), err.message, "err");
   } finally {
@@ -711,8 +718,26 @@ async function registerFaceFromResult(idx) {
 }
 
 // ---------- Riwayat ----------
-function logFaces(faces, source) {
+function cropFace(imgEl, bbox, size = 96) {
+  try {
+    const { x1, y1, x2, y2 } = bbox;
+    const pad = Math.round(Math.max(x2 - x1, y2 - y1) * 0.2);
+    const sw = imgEl.naturalWidth || imgEl.videoWidth || imgEl.width;
+    const sh = imgEl.naturalHeight || imgEl.videoHeight || imgEl.height;
+    const sx = Math.max(0, x1 - pad);
+    const sy = Math.max(0, y1 - pad);
+    const sW = Math.min(sw, x2 + pad) - sx;
+    const sH = Math.min(sh, y2 + pad) - sy;
+    const c = document.createElement("canvas");
+    c.width = size; c.height = size;
+    c.getContext("2d").drawImage(imgEl, sx, sy, sW, sH, 0, 0, size, size);
+    return c.toDataURL("image/jpeg", 0.8).split(",")[1];
+  } catch { return null; }
+}
+
+function logFaces(faces, source, imgEl = null) {
   faces.forEach((f) => {
+    const photo = imgEl && f.bbox ? cropFace(imgEl, f.bbox) : null;
     apiFetch("/api/logs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -722,6 +747,7 @@ function logFaces(faces, source) {
         det_score: f.det_score,
         source,
         embedding: !f.best && f.embedding ? f.embedding : undefined,
+        photo: photo || undefined,
       }),
     }).catch(() => {});
   });
@@ -730,14 +756,14 @@ function logFaces(faces, source) {
 const detectionCooldown = new Map();
 const LOG_COOLDOWN = 30000; // jeda 30 detik per identitas per sumber agar riwayat tidak penuh
 
-function logDetections(faces, source) {
+function logDetections(faces, source, imgEl = null) {
   const now = Date.now();
   faces.forEach((f) => {
     const key = source + ":" + (f.best ? f.best.name : "__unknown__");
     const last = detectionCooldown.get(key) || 0;
     if (now - last < LOG_COOLDOWN) return;
     detectionCooldown.set(key, now);
-    logFaces([f], source);
+    logFaces([f], source, imgEl);
   });
 }
 
@@ -767,8 +793,12 @@ async function loadLogs() {
           <button class="btn secondary log-reg-btn" data-id="${l.id}" type="button">DAFTARKAN</button>
         </div>
         <div class="quick-reg-msg"></div>` : "";
+      const photoEl = l.photo
+        ? `<img class="log-photo" src="data:image/jpeg;base64,${l.photo}" alt="foto">`
+        : `<div class="log-photo-empty"></div>`;
       return `<div class="log-row">
-        <div style="width:100%">
+        ${photoEl}
+        <div style="flex:1;min-width:0">
           <span class="log-name${known ? "" : " unknown"}">${nama}</span>
           <div class="log-meta">${waktu} · ${sumber} · kemiripan ${pct}</div>
           ${regPart}
@@ -1109,7 +1139,7 @@ async function captureAndIdentify() {
     rtImageMeta = d.image;
     drawRtBoxes(d.faces);
     renderRtResults(d.faces);
-    logDetections(d.faces, "realtime");
+    logDetections(d.faces, "realtime", canvas);
     $("#rtMsg").className = "msg";
   } catch (err) {
     showMsg($("#rtMsg"), err.message, "err");
@@ -1273,7 +1303,7 @@ async function captureGuest() {
     if (!r.ok) throw new Error(d.detail || "Gagal memproses");
 
     updateGuestGreeting(d.faces);
-    logDetections(d.faces, "guest");
+    logDetections(d.faces, "guest", canvas);
     $("#guestMsg").className = "msg";
   } catch (err) {
     showMsg($("#guestMsg"), err.message, "err");

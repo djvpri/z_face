@@ -380,6 +380,7 @@ class LogEntryRequest(BaseModel):
     det_score: float | None = None
     source: str
     embedding: list[float] | None = None
+    photo: str | None = None
 
 
 @app.post("/api/logs")
@@ -387,17 +388,18 @@ def create_log(body: LogEntryRequest, session: dict = Depends(get_session)):
     """Catat satu hasil deteksi ke riwayat."""
     if body.source not in ("identify", "realtime", "guest"):
         raise HTTPException(400, "Source tidak valid")
-    if body.name is None and body.embedding and len(body.embedding) == 512:
+    has_emb = body.name is None and body.embedding and len(body.embedding) == 512
+    if has_emb:
         db_run(
-            "INSERT INTO detection_logs (name, similarity, det_score, source, org_id, embedding) "
-            "VALUES (%s, %s, %s, %s, %s::uuid, %s::vector)",
-            (body.name, body.similarity, body.det_score, body.source, session["org_id"], vec(body.embedding)),
+            "INSERT INTO detection_logs (name, similarity, det_score, source, org_id, embedding, photo) "
+            "VALUES (%s, %s, %s, %s, %s::uuid, %s::vector, %s)",
+            (body.name, body.similarity, body.det_score, body.source, session["org_id"], vec(body.embedding), body.photo),
         )
     else:
         db_run(
-            "INSERT INTO detection_logs (name, similarity, det_score, source, org_id) "
-            "VALUES (%s, %s, %s, %s, %s::uuid)",
-            (body.name, body.similarity, body.det_score, body.source, session["org_id"]),
+            "INSERT INTO detection_logs (name, similarity, det_score, source, org_id, photo) "
+            "VALUES (%s, %s, %s, %s, %s::uuid, %s)",
+            (body.name, body.similarity, body.det_score, body.source, session["org_id"], body.photo),
         )
     return {"ok": True}
 
@@ -407,7 +409,8 @@ def list_logs(limit: int = 50, session: dict = Depends(get_session)):
     """Riwayat deteksi terbaru, urut dari yang paling baru."""
     limit = max(1, min(limit, 200))
     rows = db_all(
-        "SELECT id, name, similarity, det_score, source, created_at, embedding::text AS embedding "
+        "SELECT id, name, similarity, det_score, source, created_at, "
+        "embedding::text AS embedding, photo "
         "FROM detection_logs WHERE org_id = %s::uuid ORDER BY created_at DESC LIMIT %s",
         (session["org_id"], limit),
     )
