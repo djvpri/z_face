@@ -994,9 +994,19 @@ $("#logsRefreshBtn").addEventListener("click", loadLogs);
 
 let logsAutoRefresh = null;
 
+function loadLogsIfIdle() {
+  // Jangan refresh kalau user sedang mengetik nama atau ada input terisi,
+  // supaya ketikan di kolom "Daftarkan" tidak terhapus.
+  const active = document.activeElement;
+  if (active && active.classList.contains("quick-reg-name")) return;
+  const typing = [...document.querySelectorAll(".quick-reg-name")].some((i) => i.value.trim());
+  if (typing) return;
+  loadLogs();
+}
+
 function startLogsAutoRefresh() {
   if (logsAutoRefresh) return;
-  logsAutoRefresh = setInterval(loadLogs, 10000);
+  logsAutoRefresh = setInterval(loadLogsIfIdle, 30000);
 }
 
 function stopLogsAutoRefresh() {
