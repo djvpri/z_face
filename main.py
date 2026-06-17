@@ -137,6 +137,15 @@ def require_admin(x_admin_key: str = Header(default="")):
         raise HTTPException(403, "Akses ditolak")
 
 
+# Aksi kelola data (edit/hapus/ubah pengaturan) hanya untuk owner & admin.
+MANAGE_ROLES = ("owner", "admin")
+
+
+def require_role(session: dict, allowed: tuple):
+    if session.get("role") not in allowed:
+        raise HTTPException(403, "Role Anda tidak punya izin untuk aksi ini")
+
+
 # ----- Image helpers -----
 
 async def read_image(file: UploadFile) -> np.ndarray:
@@ -494,6 +503,7 @@ def get_settings(session: dict = Depends(get_session)):
 @app.put("/api/settings")
 def update_settings(body: SettingsRequest, session: dict = Depends(get_session)):
     """Perbarui pengaturan sapaan."""
+    require_role(session, MANAGE_ROLES)
     org_id = session["org_id"]
     updates = body.model_dump(exclude_none=True)
     for key, value in updates.items():
@@ -535,6 +545,7 @@ class PersonUpdateRequest(BaseModel):
 @app.patch("/api/people/{name}")
 def update_person(name: str, body: PersonUpdateRequest, session: dict = Depends(get_session)):
     """Ganti nama, gelar, dan/atau status pengecualian sapaan satu orang."""
+    require_role(session, MANAGE_ROLES)
     sets = []
     params: list = []
     if body.new_name is not None:
@@ -563,6 +574,7 @@ def update_person(name: str, body: PersonUpdateRequest, session: dict = Depends(
 
 @app.delete("/api/faces/{face_id}")
 def delete_face(face_id: str, session: dict = Depends(get_session)):
+    require_role(session, MANAGE_ROLES)
     db_run(
         "DELETE FROM faces WHERE id = %s::uuid AND org_id = %s::uuid",
         (face_id, session["org_id"]),
@@ -572,6 +584,7 @@ def delete_face(face_id: str, session: dict = Depends(get_session)):
 
 @app.delete("/api/people/{name}")
 def delete_person(name: str, session: dict = Depends(get_session)):
+    require_role(session, MANAGE_ROLES)
     rows = db_run(
         "DELETE FROM faces WHERE name = %s AND org_id = %s::uuid RETURNING id",
         (name, session["org_id"]),
@@ -660,6 +673,7 @@ def list_signatures(session: dict = Depends(get_session)):
 
 @app.delete("/api/signatures/{name}")
 def delete_signature(name: str, session: dict = Depends(get_session)):
+    require_role(session, MANAGE_ROLES)
     rows = db_run(
         "DELETE FROM signatures WHERE name = %s AND org_id = %s::uuid RETURNING id",
         (name, session["org_id"]),

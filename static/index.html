@@ -492,10 +492,21 @@ async function initAuth() {
     const r = await fetch("/api/auth/me", { headers: { "Authorization": "Bearer " + token } });
     if (!r.ok) { showLogin(); return; }
     const me = await r.json();
-    $("#orgBadge").textContent = me.org_name;
+    currentRole = me.role || "member";
+    $("#orgBadge").textContent = me.org_name + (currentRole ? " · " + currentRole : "");
+    applyRolePermissions();
     hideLogin();
     loadGreetingSettings();
   } catch { showLogin(); }
+}
+
+let currentRole = "member";
+function canManage() { return currentRole === "owner" || currentRole === "admin"; }
+
+function applyRolePermissions() {
+  // Member tidak boleh ubah pengaturan sapaan
+  const gs = $("#greetingSaveBtn");
+  if (gs) gs.style.display = canManage() ? "" : "none";
 }
 
 $("#loginBtn").addEventListener("click", async () => {
@@ -1566,15 +1577,16 @@ function renderPeople(term) {
     const enc = encodeURIComponent(p.name);
     const badge = p.title ? `<span class="person-title-badge">${p.title}</span>` : "";
     const exBadge = p.greet_exempt ? `<span class="person-title-badge" style="color:var(--nomatch)">tidak disapa</span>` : "";
+    const actions = canManage() ? `<div style="display:flex;gap:6px">
+        <button class="btn-edit" data-action="edit" data-name="${enc}" data-title="${p.title || ""}" data-exempt="${p.greet_exempt ? "1" : ""}">Edit</button>
+        <button data-action="hapus" data-name="${enc}">Hapus</button>
+      </div>` : "";
     return `<div class="person-row" data-name="${enc}">
       <div class="person-display">
         <div>${badge}${exBadge}<b>${p.name}</b></div>
         <div class="meta">${p.photos} foto terdaftar</div>
       </div>
-      <div style="display:flex;gap:6px">
-        <button class="btn-edit" data-action="edit" data-name="${enc}" data-title="${p.title || ""}" data-exempt="${p.greet_exempt ? "1" : ""}">Edit</button>
-        <button data-action="hapus" data-name="${enc}">Hapus</button>
-      </div>
+      ${actions}
     </div>`;
   }).join("");
 
