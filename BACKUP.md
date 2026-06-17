@@ -34,6 +34,34 @@ $ts = Get-Date -Format "yyyyMMdd_HHmm"
 Set `ZFACE_DB_URL` sebagai environment variable (jangan tulis URL langsung di skrip),
 lalu jadwalkan skrip ini lewat **Task Scheduler** tiap hari.
 
+## Skrip siap pakai + rotasi otomatis (Windows)
+
+Repo ini punya `backup_zface.ps1` — dump otomatis + hapus file lama + log.
+
+**1. Install PostgreSQL client** (untuk `pg_dump`): https://www.postgresql.org/download/windows/
+   Sesuaikan path `$PgDump` di skrip dengan versi yang ter-install.
+
+**2. Set kredensial sebagai environment variable (sekali saja, jangan di skrip):**
+```powershell
+setx ZFACE_DB_URL "POSTGRES_CONNECTION_URL_DARI_RAILWAY"
+```
+Tutup & buka ulang PowerShell setelah `setx`.
+
+**3. Uji jalankan manual:**
+```powershell
+powershell -ExecutionPolicy Bypass -File "D:\ANJUV\z_face\face-id\face-id\backup_zface.ps1"
+```
+Cek folder `D:\backup\zface` — harus ada file `.dump` dan `backup.log`.
+
+**4. Jadwalkan harian via Task Scheduler:**
+- Buka **Task Scheduler** → Create Basic Task → trigger **Daily** (mis. jam 01:00)
+- Action: **Start a program**
+  - Program: `powershell.exe`
+  - Arguments: `-ExecutionPolicy Bypass -File "D:\ANJUV\z_face\face-id\face-id\backup_zface.ps1"`
+- Centang "Run whether user is logged on or not" agar tetap jalan walau belum login.
+
+Atur retensi & folder lewat `$RetentionDays` / `$BackupDir` di dalam skrip.
+
 ## Catatan keamanan
 - File dump berisi data sensitif (embedding biometrik, hash password). Simpan
   terenkripsi / di lokasi terbatas, jangan di folder publik atau repo git.
