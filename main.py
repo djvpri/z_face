@@ -457,6 +457,36 @@ def admin_renew_org(org_id: str, _=Depends(require_admin)):
     return {"organization": rows[0]}
 
 
+class OrgExpiryRequest(BaseModel):
+    expires_at: str | None = None  # "YYYY-MM-DD"; kosong/null = tanpa batas
+
+
+@app.post("/api/admin/organizations/{org_id}/set-expiry")
+def admin_set_expiry(org_id: str, body: OrgExpiryRequest, _=Depends(require_admin)):
+    """Atur tanggal berakhir secara manual (untuk koreksi). Kosong = tanpa batas."""
+    new_exp = None
+    if body.expires_at and body.expires_at.strip():
+        s = body.expires_at.strip()
+        try:
+            if len(s) == 10:  # YYYY-MM-DD -> berlaku sampai akhir hari itu
+                d = datetime.datetime.strptime(s, "%Y-%m-%d")
+                new_exp = d.replace(hour=23, minute=59, second=59, tzinfo=datetime.timezone.utc)
+            else:
+                new_exp = datetime.datetime.fromisoformat(s)
+                if new_exp.tzinfo is None:
+                    new_exp = new_exp.replace(tzinfo=datetime.timezone.utc)
+        except Exception:
+            raise HTTPException(400, "Format tanggal tidak valid. Gunakan YYYY-MM-DD.")
+    rows = db_run(
+        "UPDATE organizations SET expires_at = %s WHERE id = %s::uuid RETURNING *",
+        (new_exp, org_id),
+    )
+    if not rows:
+        raise HTTPException(404, "Organisasi tidak ditemukan")
+    log_audit("admin", "set_expiry", new_exp.date().isoformat() if new_exp else "tanpa batas", org_id)
+    return {"organization": rows[0]}
+
+
 @app.post("/api/admin/organizations/{org_id}/suspend")
 def admin_suspend_org(org_id: str, _=Depends(require_admin)):
     """Hentikan masa aktif segera. User org langsung tidak bisa login,
