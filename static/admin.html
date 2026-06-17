@@ -217,7 +217,11 @@ async function loadOrgs() {
         <b>${o.name}</b> <span class="status ${st.cls}">${st.label}</span>
         <div class="meta">${o.plan} · kuota ${quota} · aktif s/d ${exp}</div>
         <div class="meta"><span class="id">${o.id}</span></div>
-        <button class="btn secondary org-renew" data-id="${o.id}" type="button" style="margin-top:8px;width:auto;padding:6px 12px;font-size:0.7rem;">PERPANJANG +30 HARI</button>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+          <button class="btn secondary org-renew" data-id="${o.id}" type="button" style="margin:0;width:auto;padding:6px 12px;font-size:0.7rem;">PERPANJANG +30 HARI</button>
+          <button class="btn secondary org-members" data-id="${o.id}" type="button" style="margin:0;width:auto;padding:6px 12px;font-size:0.7rem;">LIHAT MEMBER</button>
+        </div>
+        <div class="members" data-org="${o.id}" style="margin-top:10px;"></div>
       </div>`;
     }).join("");
     d.organizations.forEach((o) => {
@@ -227,6 +231,9 @@ async function loadOrgs() {
     });
     box.querySelectorAll(".org-renew").forEach((b) => {
       b.addEventListener("click", () => renewOrg(b));
+    });
+    box.querySelectorAll(".org-members").forEach((b) => {
+      b.addEventListener("click", () => loadMembers(b.dataset.id));
     });
   } catch (e) {
     box.innerHTML = '<div class="empty">Gagal memuat organisasi.</div>';
@@ -251,6 +258,39 @@ async function renewOrg(btn) {
     if (!r.ok) throw new Error(d.detail || "Gagal perpanjang");
     loadOrgs();
   } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = "PERPANJANG +30 HARI"; }
+}
+
+async function loadMembers(orgId) {
+  const box = document.querySelector(`.members[data-org="${orgId}"]`);
+  if (!box) return;
+  box.innerHTML = '<div class="empty" style="padding:6px 0">Memuat member…</div>';
+  try {
+    const r = await adminFetch("/api/admin/organizations/" + orgId + "/members");
+    const d = await safeJson(r);
+    if (!r.ok) throw new Error(d.detail || "Gagal memuat member");
+    if (!d.members.length) { box.innerHTML = '<div class="empty" style="padding:6px 0">Belum ada member.</div>'; return; }
+    box.innerHTML = d.members.map((m) => `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);">
+        <span class="meta">${m.email} · ${m.role}</span>
+        <button class="btn secondary member-cancel" data-org="${orgId}" data-uid="${m.user_id}" data-email="${m.email.replace(/"/g, "&quot;")}" type="button"
+          style="margin:0;width:auto;padding:4px 10px;font-size:0.66rem;color:var(--nomatch);border-color:var(--nomatch);">BATALKAN</button>
+      </div>`).join("");
+    box.querySelectorAll(".member-cancel").forEach((b) => {
+      b.addEventListener("click", () => cancelMember(b));
+    });
+  } catch (e) { box.innerHTML = `<div class="empty" style="padding:6px 0">${e.message}</div>`; }
+}
+
+async function cancelMember(btn) {
+  const email = btn.dataset.email;
+  if (!confirm(`Batalkan akses "${email}"? Akun ini tidak bisa login lagi.`)) return;
+  btn.disabled = true; btn.textContent = "…";
+  try {
+    const r = await adminFetch("/api/admin/organizations/" + btn.dataset.org + "/members/" + btn.dataset.uid, { method: "DELETE" });
+    const d = await safeJson(r);
+    if (!r.ok) throw new Error(d.detail || "Gagal membatalkan member");
+    loadMembers(btn.dataset.org);
+  } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = "BATALKAN"; }
 }
 
 $("#orgRefreshBtn").addEventListener("click", loadOrgs);

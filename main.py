@@ -476,6 +476,39 @@ def admin_create_user(body: UserCreateRequest, _=Depends(require_admin)):
     return {"user_id": user_id, "email": body.email, "org_id": body.org_id, "role": body.role}
 
 
+@app.get("/api/admin/organizations/{org_id}/members")
+def admin_list_members(org_id: str, _=Depends(require_admin)):
+    rows = db_all(
+        "SELECT m.user_id, u.email, m.role FROM org_members m "
+        "JOIN users u ON u.id = m.user_id WHERE m.org_id = %s::uuid ORDER BY m.created_at",
+        (org_id,),
+    )
+    for r in rows:
+        r["user_id"] = str(r["user_id"])
+    return {"members": rows}
+
+
+@app.delete("/api/admin/organizations/{org_id}/members/{user_id}")
+def admin_cancel_member(org_id: str, user_id: str, _=Depends(require_admin)):
+    """Batalkan keanggotaan user dari org. Akun user ikut dihapus bila tidak
+    lagi terdaftar di organisasi manapun (jadi tidak bisa login lagi)."""
+    row = db_one(
+        "SELECT u.email FROM org_members m JOIN users u ON u.id = m.user_id "
+        "WHERE m.org_id = %s::uuid AND m.user_id = %s::uuid",
+        (org_id, user_id),
+    )
+    if not row:
+        raise HTTPException(404, "Member tidak ditemukan di organisasi ini")
+    db_run("DELETE FROM org_members WHERE org_id = %s::uuid AND user_id = %s::uuid", (org_id, user_id))
+    still = db_one("SELECT 1 AS x FROM org_members WHERE user_id = %s::uuid LIMIT 1", (user_id,))
+    user_deleted = False
+    if not still:
+        db_run("DELETE FROM users WHERE id = %s::uuid", (user_id,))
+        user_deleted = True
+    log_audit("admin", "cancel_member", row["email"], org_id)
+    return {"cancelled": user_id, "email": row["email"], "user_deleted": user_deleted}
+
+
 # ----- Public endpoints -----
 
 @app.get("/api/health")
