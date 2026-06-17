@@ -3,3 +3,4 @@ venv/
 __pycache__/
 nasabah_import_report.csv
 nasabah_docx*.log
+.git_commit_msg.txt
