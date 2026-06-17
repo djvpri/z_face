@@ -57,6 +57,14 @@ CREATE TABLE IF NOT EXISTS app_settings (
     UNIQUE(org_id, key)
 );
 
+CREATE TABLE IF NOT EXISTS signatures (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name       TEXT NOT NULL,
+    embedding  vector(3780),
+    org_id     UUID REFERENCES organizations(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE OR REPLACE FUNCTION match_faces(
     query_embedding vector(512),
     match_threshold float,
@@ -76,6 +84,28 @@ BEGIN
     WHERE f.org_id = filter_org_id
       AND (1 - (f.embedding <=> query_embedding)) > match_threshold
     ORDER BY f.embedding <=> query_embedding
+    LIMIT match_count;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION match_signatures(
+    query_embedding vector(3780),
+    match_threshold float,
+    match_count     int,
+    filter_org_id   uuid
+)
+RETURNS TABLE (id uuid, name text, similarity float)
+LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        s.id,
+        s.name,
+        (1 - (s.embedding <=> query_embedding))::float AS similarity
+    FROM signatures s
+    WHERE s.org_id = filter_org_id
+      AND (1 - (s.embedding <=> query_embedding)) > match_threshold
+    ORDER BY s.embedding <=> query_embedding
     LIMIT match_count;
 END;
 $$;

@@ -166,6 +166,48 @@ def largest_face(faces):
     return max(faces, key=area)
 
 
+# ----- Signature (tanda tangan) helpers -----
+# Tanda tangan tidak punya model embedding seperti wajah, jadi dipakai
+# pendekatan CV klasik: binarisasi Otsu -> potong ke area tinta ->
+# normalisasi ukuran ke kanvas tetap -> deskriptor HOG -> L2-normalize.
+# Hasilnya vektor 3780-dim yang disimpan di pgvector, sehingga
+# pencocokan memakai cosine similarity yang sama seperti wajah.
+SIG_W, SIG_H = 256, 128
+SIG_DIM = 3780
+_hog = cv2.HOGDescriptor((SIG_W, SIG_H), (32, 32), (16, 16), (16, 16), 9)
+
+
+def preprocess_signature(img: np.ndarray):
+    """Ubah foto tanda tangan jadi kanvas biner ternormalisasi 256x128."""
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # Otsu, tinta gelap -> dibalik jadi tinta putih di latar hitam
+    _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    coords = cv2.findNonZero(th)
+    if coords is None:
+        return None
+    x, y, w, h = cv2.boundingRect(coords)
+    crop = th[y:y + h, x:x + w]
+    scale = min(SIG_W / w, SIG_H / h)
+    nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
+    resized = cv2.resize(crop, (nw, nh), interpolation=cv2.INTER_AREA)
+    canvas = np.zeros((SIG_H, SIG_W), dtype=np.uint8)
+    ox, oy = (SIG_W - nw) // 2, (SIG_H - nh) // 2
+    canvas[oy:oy + nh, ox:ox + nw] = resized
+    return cv2.GaussianBlur(canvas, (3, 3), 0)
+
+
+def signature_embedding(img: np.ndarray):
+    """Kembalikan embedding tanda tangan (list 3780 float, L2-normalized) atau None."""
+    canvas = preprocess_signature(img)
+    if canvas is None:
+        return None
+    desc = _hog.compute(canvas).flatten().astype(float)
+    norm = np.linalg.norm(desc)
+    if norm > 0:
+        desc = desc / norm
+    return desc.tolist()
+
+
 # ----- Auth endpoints (public) -----
 
 class LoginRequest(BaseModel):
@@ -530,6 +572,94 @@ def delete_person(name: str, session: dict = Depends(get_session)):
         (name, session["org_id"]),
     )
     return {"deleted_name": name, "deleted_entries": len(rows)}
+
+
+# ----- Signature (tanda tangan) endpoints -----
+
+@app.post("/api/signatures/identify")
+async def identify_signature(
+    file: UploadFile = File(...),
+    threshold: float = Form(0.55),
+    session: dict = Depends(get_session),
+):
+    """Identifikasi pemilik tanda tangan dari foto/scan."""
+    img = await read_image(file)
+    embedding = signature_embedding(img)
+    if embedding is None:
+        raise HTTPException(400, "Tidak ada goresan tanda tangan terdeteksi di gambar")
+    rows = db_all(
+        "SELECT * FROM match_signatures(%s::vector, %s, %s, %s::uuid)",
+        (vec(embedding), threshold, 3, session["org_id"]),
+    )
+    matches = [
+        {"id": str(m["id"]), "name": m["name"], "similarity": round(float(m["similarity"]), 4)}
+        for m in rows
+    ]
+    return {"matches": matches, "best": matches[0] if matches else None, "embedding": embedding}
+
+
+@app.post("/api/signatures/register")
+async def register_signature(
+    name: str = Form(...),
+    file: UploadFile = File(...),
+    session: dict = Depends(get_session),
+):
+    """Daftarkan contoh tanda tangan atas nama seseorang."""
+    name = name.strip()
+    if not name:
+        raise HTTPException(400, "Nama tidak boleh kosong")
+    img = await read_image(file)
+    embedding = signature_embedding(img)
+    if embedding is None:
+        raise HTTPException(400, "Tidak ada goresan tanda tangan terdeteksi di gambar")
+    rows = db_run(
+        "INSERT INTO signatures (name, embedding, org_id) VALUES (%s, %s::vector, %s::uuid) RETURNING id",
+        (name, vec(embedding), session["org_id"]),
+    )
+    return {"id": str(rows[0]["id"]), "name": name}
+
+
+class SignatureEmbeddingRequest(BaseModel):
+    name: str
+    embedding: list[float]
+
+
+@app.post("/api/signatures/register-embedding")
+def register_signature_embedding(body: SignatureEmbeddingRequest, session: dict = Depends(get_session)):
+    """Daftarkan tanda tangan dari embedding yang sudah dihitung (hasil identify)."""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "Nama tidak boleh kosong")
+    if len(body.embedding) != SIG_DIM:
+        raise HTTPException(400, "Embedding tanda tangan tidak valid")
+    rows = db_run(
+        "INSERT INTO signatures (name, embedding, org_id) VALUES (%s, %s::vector, %s::uuid) RETURNING id",
+        (name, vec(body.embedding), session["org_id"]),
+    )
+    return {"id": str(rows[0]["id"]), "name": name}
+
+
+@app.get("/api/signatures")
+def list_signatures(session: dict = Depends(get_session)):
+    """Daftar tanda tangan terdaftar, dikelompokkan per nama."""
+    rows = db_all(
+        "SELECT id, name, created_at FROM signatures WHERE org_id = %s::uuid ORDER BY created_at DESC",
+        (session["org_id"],),
+    )
+    grouped: dict[str, dict] = {}
+    for row in rows:
+        g = grouped.setdefault(row["name"], {"name": row["name"], "samples": 0})
+        g["samples"] += 1
+    return {"total": len(rows), "signatures": list(grouped.values())}
+
+
+@app.delete("/api/signatures/{name}")
+def delete_signature(name: str, session: dict = Depends(get_session)):
+    rows = db_run(
+        "DELETE FROM signatures WHERE name = %s AND org_id = %s::uuid RETURNING id",
+        (name, session["org_id"]),
+    )
+    return {"deleted_name": name, "deleted_samples": len(rows)}
 
 
 # ----- Static UI -----
