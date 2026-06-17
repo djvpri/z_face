@@ -6,6 +6,7 @@ Stack: FastAPI + InsightFace (buffalo_l) + Railway PostgreSQL + pgvector
 import datetime
 import json
 import os
+import time
 
 import bcrypt
 import cv2
@@ -15,7 +16,7 @@ import psycopg2
 import psycopg2.extras
 import psycopg2.pool
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -26,6 +27,9 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 JWT_SECRET = os.getenv("JWT_SECRET", "")
 ADMIN_KEY = os.getenv("ADMIN_KEY", "")
+# Domain yang boleh akses API (pisahkan dengan koma). Kosong = hanya same-origin
+# (app web disajikan dari server yang sama, jadi tidak butuh CORS lintas-domain).
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 
 # ----- Paket langganan -----
 # quota_faces: batas jumlah wajah (0 = tak terbatas).
@@ -60,12 +64,45 @@ print("Model siap.")
 
 app = FastAPI(title="ZFace API", version="1.0.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+if ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    print("CORS: lintas-domain dimatikan (hanya same-origin). Set ALLOWED_ORIGINS bila perlu.")
+
+
+# ----- Rate limiting login (anti brute-force) -----
+LOGIN_MAX_FAILS = 5          # maksimal gagal sebelum diblokir
+LOGIN_WINDOW = 15 * 60       # jendela waktu (detik)
+_login_fails: dict[str, list[float]] = {}
+
+
+def client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def login_rate_check(ip: str):
+    now = time.time()
+    fails = [t for t in _login_fails.get(ip, []) if now - t < LOGIN_WINDOW]
+    _login_fails[ip] = fails
+    if len(fails) >= LOGIN_MAX_FAILS:
+        wait = int((LOGIN_WINDOW - (now - fails[0])) / 60) + 1
+        raise HTTPException(429, f"Terlalu banyak percobaan login. Coba lagi dalam {wait} menit.")
+
+
+def login_record_fail(ip: str):
+    _login_fails.setdefault(ip, []).append(time.time())
+
+
+def login_record_success(ip: str):
+    _login_fails.pop(ip, None)
 
 
 # ----- DB helpers -----
@@ -126,6 +163,18 @@ def db_run(sql: str, params=()):
 def vec(embedding: list[float]) -> str:
     """Konversi embedding list ke format string pgvector."""
     return "[" + ",".join(str(v) for v in embedding) + "]"
+
+
+def log_audit(actor: str, action: str, detail: str = "", org_id: str | None = None):
+    """Catat aksi penting (buat/hapus/ubah) ke audit_log. Tidak menggagalkan
+    aksi utama bila pencatatan gagal."""
+    try:
+        db_run(
+            "INSERT INTO audit_log (actor, action, detail, org_id) VALUES (%s, %s, %s, %s)",
+            (actor, action, detail, org_id),
+        )
+    except Exception:
+        pass
 
 
 # ----- Auth helpers -----
@@ -271,15 +320,20 @@ class LoginRequest(BaseModel):
 
 
 @app.post("/api/auth/login")
-def login(body: LoginRequest):
+def login(body: LoginRequest, request: Request):
     if not JWT_SECRET:
         raise HTTPException(503, "Auth belum dikonfigurasi (JWT_SECRET)")
+    ip = client_ip(request)
+    login_rate_check(ip)
     row = db_one("SELECT id, password_hash FROM users WHERE email = %s", (body.email,))
     if not row:
+        login_record_fail(ip)
         raise HTTPException(401, "Email atau password salah")
     pw_ok = bcrypt.checkpw(body.password.encode(), row["password_hash"].encode())
     if not pw_ok:
+        login_record_fail(ip)
         raise HTTPException(401, "Email atau password salah")
+    login_record_success(ip)
     user_id = str(row["id"])
     token = jwt.encode(
         {
@@ -344,7 +398,10 @@ def admin_create_org(body: OrgCreateRequest, _=Depends(require_admin)):
         "VALUES (%s, %s, %s, TRUE, %s) RETURNING *",
         (body.name.strip(), body.plan, plan_quota(body.plan), expires),
     )
-    return {"organization": rows[0] if rows else None}
+    org = rows[0] if rows else None
+    if org:
+        log_audit("admin", "create_org", f"{org['name']} ({body.plan})", str(org["id"]))
+    return {"organization": org}
 
 
 @app.patch("/api/admin/organizations/{org_id}")
@@ -357,6 +414,7 @@ def admin_change_plan(org_id: str, body: OrgPlanRequest, _=Depends(require_admin
     )
     if not rows:
         raise HTTPException(404, "Organisasi tidak ditemukan")
+    log_audit("admin", "change_plan", f"ke {body.plan}", org_id)
     return {"organization": rows[0]}
 
 
@@ -373,6 +431,7 @@ def admin_renew_org(org_id: str, _=Depends(require_admin)):
         "UPDATE organizations SET expires_at = %s, active = TRUE WHERE id = %s::uuid RETURNING *",
         (new_expiry, org_id),
     )
+    log_audit("admin", "renew", f"s/d {new_expiry.date().isoformat()}", org_id)
     return {"organization": rows[0]}
 
 
@@ -380,6 +439,20 @@ def admin_renew_org(org_id: str, _=Depends(require_admin)):
 def admin_list_orgs(_=Depends(require_admin)):
     rows = db_all("SELECT * FROM organizations ORDER BY created_at")
     return {"organizations": rows}
+
+
+@app.get("/api/admin/audit")
+def admin_audit(limit: int = 100, _=Depends(require_admin)):
+    limit = max(1, min(limit, 500))
+    rows = db_all(
+        "SELECT actor, action, detail, org_id, created_at FROM audit_log "
+        "ORDER BY created_at DESC LIMIT %s",
+        (limit,),
+    )
+    for r in rows:
+        if r.get("org_id") is not None:
+            r["org_id"] = str(r["org_id"])
+    return {"audit": rows}
 
 
 @app.post("/api/admin/users")
@@ -399,6 +472,7 @@ def admin_create_user(body: UserCreateRequest, _=Depends(require_admin)):
         "INSERT INTO org_members (org_id, user_id, role) VALUES (%s, %s, %s)",
         (body.org_id, user_id, body.role),
     )
+    log_audit("admin", "create_user", f"{body.email} ({body.role})", body.org_id)
     return {"user_id": user_id, "email": body.email, "org_id": body.org_id, "role": body.role}
 
 
@@ -674,6 +748,7 @@ def delete_person(name: str, session: dict = Depends(get_session)):
         "DELETE FROM faces WHERE name = %s AND org_id = %s::uuid RETURNING id",
         (name, session["org_id"]),
     )
+    log_audit(session["user_id"], "delete_person", f"{name} ({len(rows)} foto)", session["org_id"])
     return {"deleted_name": name, "deleted_entries": len(rows)}
 
 
@@ -766,6 +841,7 @@ def delete_signature(name: str, session: dict = Depends(get_session)):
         "DELETE FROM signatures WHERE name = %s AND org_id = %s::uuid RETURNING id",
         (name, session["org_id"]),
     )
+    log_audit(session["user_id"], "delete_signature", f"{name} ({len(rows)} contoh)", session["org_id"])
     return {"deleted_name": name, "deleted_samples": len(rows)}
 
 

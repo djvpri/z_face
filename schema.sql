@@ -67,6 +67,15 @@ CREATE TABLE IF NOT EXISTS signatures (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS audit_log (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actor      TEXT,
+    action     TEXT,
+    detail     TEXT,
+    org_id     UUID,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE OR REPLACE FUNCTION match_faces(
     query_embedding vector(512),
     match_threshold float,

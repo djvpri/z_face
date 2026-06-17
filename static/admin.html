@@ -133,6 +133,13 @@
     <button class="btn" id="userBtn" type="button">BUAT USER</button>
     <div class="msg" id="userMsg"></div>
   </div>
+
+  <!-- Log aktivitas -->
+  <div class="card">
+    <div class="eyebrow">Log Aktivitas</div>
+    <div id="auditList"><div class="empty">Memuat…</div></div>
+    <button class="btn secondary" id="auditRefreshBtn" type="button">MUAT ULANG</button>
+  </div>
 </div>
 
 <script>
@@ -164,6 +171,7 @@ $("#keyBtn").addEventListener("click", async () => {
       localStorage.setItem("zface_admin_key", key);
       $("#gate").classList.add("hidden");
       loadOrgs();
+      loadAudit();
     } else {
       showMsg($("#keyMsg"), "Admin key salah", "err");
     }
@@ -290,11 +298,33 @@ $("#userBtn").addEventListener("click", async () => {
   finally { btn.disabled = false; btn.textContent = "BUAT USER"; }
 });
 
+// ---- Log aktivitas ----
+async function loadAudit() {
+  const box = $("#auditList");
+  box.innerHTML = '<div class="empty">Memuat…</div>';
+  try {
+    const r = await adminFetch("/api/admin/audit");
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Gagal memuat");
+    if (!d.audit.length) { box.innerHTML = '<div class="empty">Belum ada aktivitas.</div>'; return; }
+    box.innerHTML = d.audit.map((a) => {
+      const w = new Date(a.created_at).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+      return `<div class="org-row">
+        <b>${a.action}</b> <span class="meta">${a.detail || ""}</span>
+        <div class="meta">${w} · oleh ${a.actor}</div>
+      </div>`;
+    }).join("");
+  } catch (e) {
+    box.innerHTML = '<div class="empty">Gagal memuat log.</div>';
+  }
+}
+$("#auditRefreshBtn").addEventListener("click", loadAudit);
+
 // ---- Init ----
 (async () => {
   if (adminKey) {
     try {
-      if (await tryUnlock(adminKey)) { $("#gate").classList.add("hidden"); loadOrgs(); return; }
+      if (await tryUnlock(adminKey)) { $("#gate").classList.add("hidden"); loadOrgs(); loadAudit(); return; }
     } catch {}
   }
   $("#gate").classList.remove("hidden");
