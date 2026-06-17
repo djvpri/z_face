@@ -210,15 +210,19 @@ async function loadOrgs() {
       return;
     }
     box.innerHTML = d.organizations.map((o) => {
-      const st = subStatus(o.expires_at);
+      const st = subStatus(o);
       const exp = o.expires_at ? new Date(o.expires_at).toLocaleDateString("id-ID", { dateStyle: "medium" }) : "tanpa batas";
       const quota = o.quota_faces ? o.quota_faces : "∞";
+      const toggle = o.active
+        ? `<button class="btn secondary org-toggle" data-id="${o.id}" data-act="suspend" type="button" style="margin:0;width:auto;padding:6px 12px;font-size:0.7rem;color:var(--nomatch);border-color:var(--nomatch);">NONAKTIFKAN</button>`
+        : `<button class="btn secondary org-toggle" data-id="${o.id}" data-act="activate" type="button" style="margin:0;width:auto;padding:6px 12px;font-size:0.7rem;">AKTIFKAN</button>`;
       return `<div class="org-row">
         <b>${o.name}</b> <span class="status ${st.cls}">${st.label}</span>
         <div class="meta">${o.plan} · kuota ${quota} · aktif s/d ${exp}</div>
         <div class="meta"><span class="id">${o.id}</span></div>
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
           <button class="btn secondary org-renew" data-id="${o.id}" type="button" style="margin:0;width:auto;padding:6px 12px;font-size:0.7rem;">PERPANJANG +30 HARI</button>
+          ${toggle}
           <button class="btn secondary org-members" data-id="${o.id}" type="button" style="margin:0;width:auto;padding:6px 12px;font-size:0.7rem;">LIHAT MEMBER</button>
         </div>
         <div class="members" data-org="${o.id}" style="margin-top:10px;"></div>
@@ -235,19 +239,35 @@ async function loadOrgs() {
     box.querySelectorAll(".org-members").forEach((b) => {
       b.addEventListener("click", () => loadMembers(b.dataset.id));
     });
+    box.querySelectorAll(".org-toggle").forEach((b) => {
+      b.addEventListener("click", () => toggleOrg(b));
+    });
   } catch (e) {
     box.innerHTML = '<div class="empty">Gagal memuat organisasi.</div>';
   }
 }
 
-function subStatus(expiresAt) {
-  if (!expiresAt) return { label: "aktif", cls: "ok" };
+function subStatus(o) {
+  if (o.active === false) return { label: "nonaktif", cls: "err" };
+  if (!o.expires_at) return { label: "aktif", cls: "ok" };
   const now = new Date();
-  const exp = new Date(expiresAt);
+  const exp = new Date(o.expires_at);
   const grace = new Date(exp.getTime() + 7 * 86400000);
   if (now <= exp) return { label: "aktif", cls: "ok" };
   if (now <= grace) return { label: "masa tenggang", cls: "warn" };
   return { label: "expired", cls: "err" };
+}
+
+async function toggleOrg(btn) {
+  const act = btn.dataset.act; // suspend | activate
+  if (act === "suspend" && !confirm("Nonaktifkan organisasi ini? Semua user-nya langsung tidak bisa login (data tetap aman).")) return;
+  btn.disabled = true; btn.textContent = "…";
+  try {
+    const r = await adminFetch("/api/admin/organizations/" + btn.dataset.id + "/" + act, { method: "POST" });
+    const d = await safeJson(r);
+    if (!r.ok) throw new Error(d.detail || "Gagal mengubah status");
+    loadOrgs();
+  } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = act === "suspend" ? "NONAKTIFKAN" : "AKTIFKAN"; }
 }
 
 async function renewOrg(btn) {

@@ -435,6 +435,33 @@ def admin_renew_org(org_id: str, _=Depends(require_admin)):
     return {"organization": rows[0]}
 
 
+@app.post("/api/admin/organizations/{org_id}/suspend")
+def admin_suspend_org(org_id: str, _=Depends(require_admin)):
+    """Hentikan masa aktif segera. User org langsung tidak bisa login,
+    tapi data tetap aman (bisa diaktifkan lagi)."""
+    rows = db_run(
+        "UPDATE organizations SET active = FALSE WHERE id = %s::uuid RETURNING *",
+        (org_id,),
+    )
+    if not rows:
+        raise HTTPException(404, "Organisasi tidak ditemukan")
+    log_audit("admin", "suspend", rows[0]["name"], org_id)
+    return {"organization": rows[0]}
+
+
+@app.post("/api/admin/organizations/{org_id}/activate")
+def admin_activate_org(org_id: str, _=Depends(require_admin)):
+    """Aktifkan kembali organisasi yang dinonaktifkan (tanpa mengubah masa aktif)."""
+    rows = db_run(
+        "UPDATE organizations SET active = TRUE WHERE id = %s::uuid RETURNING *",
+        (org_id,),
+    )
+    if not rows:
+        raise HTTPException(404, "Organisasi tidak ditemukan")
+    log_audit("admin", "activate", rows[0]["name"], org_id)
+    return {"organization": rows[0]}
+
+
 @app.get("/api/admin/organizations")
 def admin_list_orgs(_=Depends(require_admin)):
     rows = db_all("SELECT * FROM organizations ORDER BY created_at")
