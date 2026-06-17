@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS organizations (
     plan        TEXT DEFAULT 'starter',
     quota_faces INTEGER DEFAULT 500,
     active      BOOLEAN DEFAULT TRUE,
+    expires_at  TIMESTAMPTZ,
     created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 

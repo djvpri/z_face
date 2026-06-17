@@ -52,6 +52,10 @@
   .org-row b { font-weight: 600; }
   .org-row .meta { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
   .org-row .meta .id { user-select: all; }
+  .status { font-family: var(--mono); font-size: 0.62rem; padding: 1px 7px; border-radius: 10px; vertical-align: middle; }
+  .status.ok { background: var(--accent-soft); color: var(--accent); }
+  .status.warn { background: #F6E9D7; color: #9A6A12; }
+  .status.err { background: #F6E3D7; color: var(--nomatch); }
 
   #gate { position: fixed; inset: 0; z-index: 100; background: rgba(14,25,35,0.93); display: flex; align-items: center; justify-content: center; padding: 20px; }
   #gate.hidden { display: none; }
@@ -87,20 +91,13 @@
     <div class="eyebrow">Buat Organisasi Baru</div>
     <label for="orgName">Nama organisasi</label>
     <input type="text" id="orgName" placeholder="BPR Sejahtera">
-    <div class="row">
-      <div>
-        <label for="orgPlan">Plan</label>
-        <select id="orgPlan">
-          <option value="starter">starter</option>
-          <option value="pro">pro</option>
-          <option value="enterprise">enterprise</option>
-        </select>
-      </div>
-      <div>
-        <label for="orgQuota">Kuota wajah</label>
-        <input type="number" id="orgQuota" value="500" min="1">
-      </div>
-    </div>
+    <label for="orgPlan">Paket</label>
+    <select id="orgPlan">
+      <option value="starter">starter</option>
+      <option value="pro">pro</option>
+      <option value="enterprise">enterprise</option>
+    </select>
+    <p id="planInfo" style="font-family:var(--mono);font-size:0.72rem;color:var(--muted);margin-top:8px;line-height:1.6;"></p>
     <button class="btn" id="orgBtn" type="button">BUAT ORGANISASI</button>
     <div class="msg" id="orgMsg"></div>
   </div>
@@ -197,22 +194,60 @@ async function loadOrgs() {
       box.innerHTML = '<div class="empty">Belum ada organisasi.</div>';
       return;
     }
-    box.innerHTML = d.organizations.map((o) => `
-      <div class="org-row">
-        <b>${o.name}</b>
-        <div class="meta">${o.plan} · kuota ${o.quota_faces} · <span class="id">${o.id}</span></div>
-      </div>`).join("");
+    box.innerHTML = d.organizations.map((o) => {
+      const st = subStatus(o.expires_at);
+      const exp = o.expires_at ? new Date(o.expires_at).toLocaleDateString("id-ID", { dateStyle: "medium" }) : "tanpa batas";
+      const quota = o.quota_faces ? o.quota_faces : "∞";
+      return `<div class="org-row">
+        <b>${o.name}</b> <span class="status ${st.cls}">${st.label}</span>
+        <div class="meta">${o.plan} · kuota ${quota} · aktif s/d ${exp}</div>
+        <div class="meta"><span class="id">${o.id}</span></div>
+        <button class="btn secondary org-renew" data-id="${o.id}" type="button" style="margin-top:8px;width:auto;padding:6px 12px;font-size:0.7rem;">PERPANJANG +30 HARI</button>
+      </div>`;
+    }).join("");
     d.organizations.forEach((o) => {
       const opt = document.createElement("option");
       opt.value = o.id; opt.textContent = o.name;
       sel.appendChild(opt);
+    });
+    box.querySelectorAll(".org-renew").forEach((b) => {
+      b.addEventListener("click", () => renewOrg(b));
     });
   } catch (e) {
     box.innerHTML = '<div class="empty">Gagal memuat organisasi.</div>';
   }
 }
 
+function subStatus(expiresAt) {
+  if (!expiresAt) return { label: "aktif", cls: "ok" };
+  const now = new Date();
+  const exp = new Date(expiresAt);
+  const grace = new Date(exp.getTime() + 7 * 86400000);
+  if (now <= exp) return { label: "aktif", cls: "ok" };
+  if (now <= grace) return { label: "masa tenggang", cls: "warn" };
+  return { label: "expired", cls: "err" };
+}
+
+async function renewOrg(btn) {
+  btn.disabled = true; btn.textContent = "…";
+  try {
+    const r = await adminFetch("/api/admin/organizations/" + btn.dataset.id + "/renew", { method: "POST" });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Gagal perpanjang");
+    loadOrgs();
+  } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = "PERPANJANG +30 HARI"; }
+}
+
 $("#orgRefreshBtn").addEventListener("click", loadOrgs);
+
+const PLAN_QUOTA = { starter: "500 wajah", pro: "2.000 wajah", enterprise: "tak terbatas" };
+const PLAN_FEAT = { starter: "Wajah, Realtime, TAMU", pro: "+ Tanda Tangan", enterprise: "Semua fitur" };
+function updatePlanInfo() {
+  const p = $("#orgPlan").value;
+  $("#planInfo").textContent = `Kuota: ${PLAN_QUOTA[p]} · Fitur: ${PLAN_FEAT[p]} · Masa aktif: 30 hari (bisa diperpanjang)`;
+}
+$("#orgPlan").addEventListener("change", updatePlanInfo);
+updatePlanInfo();
 
 $("#orgBtn").addEventListener("click", async () => {
   const name = $("#orgName").value.trim();
@@ -222,15 +257,11 @@ $("#orgBtn").addEventListener("click", async () => {
     const r = await adminFetch("/api/admin/organizations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        plan: $("#orgPlan").value,
-        quota_faces: parseInt($("#orgQuota").value, 10) || 500,
-      }),
+      body: JSON.stringify({ name, plan: $("#orgPlan").value }),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || "Gagal membuat organisasi");
-    showMsg($("#orgMsg"), `Organisasi "${name}" dibuat.`, "ok");
+    showMsg($("#orgMsg"), `Organisasi "${name}" dibuat (aktif 30 hari).`, "ok");
     $("#orgName").value = "";
     loadOrgs();
   } catch (e) { showMsg($("#orgMsg"), e.message, "err"); }

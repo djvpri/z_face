@@ -27,6 +27,25 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 JWT_SECRET = os.getenv("JWT_SECRET", "")
 ADMIN_KEY = os.getenv("ADMIN_KEY", "")
 
+# ----- Paket langganan -----
+# quota_faces: batas jumlah wajah (0 = tak terbatas).
+# features.signature: izin pakai identifikasi tanda tangan.
+PLANS = {
+    "starter":    {"quota_faces": 500,  "features": {"signature": False}},
+    "pro":        {"quota_faces": 2000, "features": {"signature": True}},
+    "enterprise": {"quota_faces": 0,    "features": {"signature": True}},
+}
+PLAN_DAYS = 30   # masa aktif default saat buat/perpanjang org
+GRACE_DAYS = 7   # masa tenggang setelah expired sebelum dikunci total
+
+
+def plan_quota(plan: str) -> int:
+    return PLANS.get(plan, PLANS["starter"])["quota_faces"]
+
+
+def plan_features(plan: str) -> dict:
+    return PLANS.get(plan, PLANS["starter"])["features"]
+
 db_pool: psycopg2.pool.ThreadedConnectionPool | None = None
 if DATABASE_URL:
     db_pool = psycopg2.pool.ThreadedConnectionPool(1, 10, DATABASE_URL)
@@ -124,12 +143,34 @@ def get_session(authorization: str = Header(default="")):
     except Exception:
         raise HTTPException(401, "Sesi tidak valid atau sudah berakhir. Silakan login kembali.")
     row = db_one(
-        "SELECT org_id, role FROM org_members WHERE user_id = %s LIMIT 1",
+        "SELECT m.org_id, m.role, o.plan, o.active, o.expires_at "
+        "FROM org_members m JOIN organizations o ON o.id = m.org_id "
+        "WHERE m.user_id = %s LIMIT 1",
         (user_id,),
     )
     if not row:
         raise HTTPException(403, "Akun tidak terdaftar di organisasi manapun. Hubungi admin.")
-    return {"user_id": user_id, "org_id": str(row["org_id"]), "role": row["role"]}
+    if row.get("active") is False:
+        raise HTTPException(403, "Organisasi nonaktif. Hubungi admin.")
+
+    plan = row.get("plan") or "starter"
+    expires_at = row.get("expires_at")
+    sub_status = "active"
+    if expires_at is not None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if now > expires_at:
+            if now > expires_at + datetime.timedelta(days=GRACE_DAYS):
+                raise HTTPException(402, "Langganan organisasi sudah berakhir. Hubungi admin untuk perpanjangan.")
+            sub_status = "grace"
+
+    return {
+        "user_id": user_id,
+        "org_id": str(row["org_id"]),
+        "role": row["role"],
+        "plan": plan,
+        "sub_status": sub_status,
+        "expires_at": expires_at.isoformat() if expires_at else None,
+    }
 
 
 def require_admin(x_admin_key: str = Header(default="")):
@@ -144,6 +185,11 @@ MANAGE_ROLES = ("owner", "admin")
 def require_role(session: dict, allowed: tuple):
     if session.get("role") not in allowed:
         raise HTTPException(403, "Role Anda tidak punya izin untuk aksi ini")
+
+
+def require_feature(session: dict, feature: str):
+    if not plan_features(session.get("plan", "starter")).get(feature, False):
+        raise HTTPException(403, f"Fitur ini tidak tersedia di paket {session.get('plan', '')}. Upgrade paket untuk memakainya.")
 
 
 # ----- Image helpers -----
@@ -250,18 +296,20 @@ def login(body: LoginRequest):
 @app.get("/api/auth/me")
 def get_me(session: dict = Depends(get_session)):
     row = db_one(
-        "SELECT o.name, o.plan, o.quota_faces FROM organizations o "
-        "JOIN org_members m ON m.org_id = o.id WHERE m.user_id = %s LIMIT 1",
-        (session["user_id"],),
+        "SELECT name FROM organizations WHERE id = %s::uuid LIMIT 1",
+        (session["org_id"],),
     )
-    org = row or {}
+    plan = session["plan"]
     return {
         "user_id": session["user_id"],
         "org_id": session["org_id"],
         "role": session["role"],
-        "org_name": org.get("name", ""),
-        "plan": org.get("plan", "starter"),
-        "quota_faces": org.get("quota_faces", 0),
+        "org_name": (row or {}).get("name", ""),
+        "plan": plan,
+        "quota_faces": plan_quota(plan),
+        "features": plan_features(plan),
+        "sub_status": session["sub_status"],
+        "expires_at": session["expires_at"],
     }
 
 
@@ -270,7 +318,10 @@ def get_me(session: dict = Depends(get_session)):
 class OrgCreateRequest(BaseModel):
     name: str
     plan: str = "starter"
-    quota_faces: int = 500
+
+
+class OrgPlanRequest(BaseModel):
+    plan: str
 
 
 class UserCreateRequest(BaseModel):
@@ -284,11 +335,45 @@ class UserCreateRequest(BaseModel):
 def admin_create_org(body: OrgCreateRequest, _=Depends(require_admin)):
     if not body.name.strip():
         raise HTTPException(400, "Nama organisasi tidak boleh kosong")
+    if body.plan not in PLANS:
+        raise HTTPException(400, "Plan tidak valid")
+    # Kuota mengikuti paket; masa aktif otomatis +PLAN_DAYS hari.
+    expires = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=PLAN_DAYS)
     rows = db_run(
-        "INSERT INTO organizations (name, plan, quota_faces, active) VALUES (%s, %s, %s, TRUE) RETURNING *",
-        (body.name.strip(), body.plan, body.quota_faces),
+        "INSERT INTO organizations (name, plan, quota_faces, active, expires_at) "
+        "VALUES (%s, %s, %s, TRUE, %s) RETURNING *",
+        (body.name.strip(), body.plan, plan_quota(body.plan), expires),
     )
     return {"organization": rows[0] if rows else None}
+
+
+@app.patch("/api/admin/organizations/{org_id}")
+def admin_change_plan(org_id: str, body: OrgPlanRequest, _=Depends(require_admin)):
+    if body.plan not in PLANS:
+        raise HTTPException(400, "Plan tidak valid")
+    rows = db_run(
+        "UPDATE organizations SET plan = %s, quota_faces = %s WHERE id = %s::uuid RETURNING *",
+        (body.plan, plan_quota(body.plan), org_id),
+    )
+    if not rows:
+        raise HTTPException(404, "Organisasi tidak ditemukan")
+    return {"organization": rows[0]}
+
+
+@app.post("/api/admin/organizations/{org_id}/renew")
+def admin_renew_org(org_id: str, _=Depends(require_admin)):
+    """Perpanjang masa aktif +PLAN_DAYS hari (dari tanggal expired bila masih aktif)."""
+    org = db_one("SELECT expires_at FROM organizations WHERE id = %s::uuid", (org_id,))
+    if org is None:
+        raise HTTPException(404, "Organisasi tidak ditemukan")
+    now = datetime.datetime.now(datetime.timezone.utc)
+    base = org["expires_at"] if org["expires_at"] and org["expires_at"] > now else now
+    new_expiry = base + datetime.timedelta(days=PLAN_DAYS)
+    rows = db_run(
+        "UPDATE organizations SET expires_at = %s, active = TRUE WHERE id = %s::uuid RETURNING *",
+        (new_expiry, org_id),
+    )
+    return {"organization": rows[0]}
 
 
 @app.get("/api/admin/organizations")
@@ -601,6 +686,7 @@ async def identify_signature(
     session: dict = Depends(get_session),
 ):
     """Identifikasi pemilik tanda tangan dari foto/scan."""
+    require_feature(session, "signature")
     img = await read_image(file)
     embedding = signature_embedding(img)
     if embedding is None:
@@ -623,6 +709,7 @@ async def register_signature(
     session: dict = Depends(get_session),
 ):
     """Daftarkan contoh tanda tangan atas nama seseorang."""
+    require_feature(session, "signature")
     name = name.strip()
     if not name:
         raise HTTPException(400, "Nama tidak boleh kosong")
@@ -645,6 +732,7 @@ class SignatureEmbeddingRequest(BaseModel):
 @app.post("/api/signatures/register-embedding")
 def register_signature_embedding(body: SignatureEmbeddingRequest, session: dict = Depends(get_session)):
     """Daftarkan tanda tangan dari embedding yang sudah dihitung (hasil identify)."""
+    require_feature(session, "signature")
     name = body.name.strip()
     if not name:
         raise HTTPException(400, "Nama tidak boleh kosong")

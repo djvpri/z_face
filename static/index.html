@@ -236,14 +236,14 @@
     .card { padding: 14px; }
   }
 
-  /* Login overlay */
-  #loginOverlay {
+  /* Login / lock overlay */
+  #loginOverlay, #lockOverlay {
     position: fixed; inset: 0; z-index: 1000;
     background: rgba(14,25,35,0.93);
     display: flex; align-items: center; justify-content: center;
     padding: 20px;
   }
-  #loginOverlay.hidden { display: none; }
+  #loginOverlay.hidden, #lockOverlay.hidden { display: none; }
   .login-box {
     background: var(--surface); border-radius: 16px; padding: 40px 36px;
     width: 100%; max-width: 380px;
@@ -271,6 +271,14 @@
   </div>
 </div>
 
+<div id="lockOverlay" class="hidden">
+  <div class="login-box" style="text-align:center">
+    <h2>Langganan <span style="color:var(--nomatch)">Berakhir</span></h2>
+    <p class="sub" id="lockMsg" style="margin-bottom:24px"></p>
+    <button class="btn secondary" id="lockLogoutBtn" type="button">KELUAR</button>
+  </div>
+</div>
+
 <div class="wrap">
   <header>
     <h1>Z<span>Face</span></h1>
@@ -280,6 +288,8 @@
       <button id="logoutBtn" class="btn secondary" type="button" style="padding:6px 14px;font-size:0.7rem;width:auto;">KELUAR</button>
     </div>
   </header>
+
+  <div id="subBanner" style="display:none;background:#F6E3D7;color:var(--nomatch);padding:10px 14px;border-radius:8px;font-size:0.82rem;margin-bottom:16px;"></div>
 
   <nav>
     <button class="active" data-tab="identify">IDENTIFIKASI</button>
@@ -465,8 +475,14 @@ const $ = (s) => document.querySelector(s);
 function apiFetch(url, opts = {}) {
   const token = localStorage.getItem("zface_token") || "";
   const headers = Object.assign({ "Authorization": "Bearer " + token }, opts.headers || {});
-  return fetch(url, Object.assign({}, opts, { headers })).then((r) => {
+  return fetch(url, Object.assign({}, opts, { headers })).then(async (r) => {
     if (r.status === 401) { showLogin(); throw new Error("Sesi berakhir, silakan login kembali"); }
+    if (r.status === 402) {
+      let msg = "Langganan organisasi sudah berakhir.";
+      try { msg = (await r.clone().json()).detail || msg; } catch {}
+      showLock(msg);
+      throw new Error(msg);
+    }
     return r;
   });
 }
@@ -490,23 +506,54 @@ async function initAuth() {
   if (!token) { showLogin(); return; }
   try {
     const r = await fetch("/api/auth/me", { headers: { "Authorization": "Bearer " + token } });
+    if (r.status === 402) {
+      const e = await r.json();
+      showLock(e.detail || "Langganan organisasi sudah berakhir.");
+      return;
+    }
     if (!r.ok) { showLogin(); return; }
     const me = await r.json();
     currentRole = me.role || "member";
+    currentFeatures = me.features || {};
     $("#orgBadge").textContent = me.org_name + (currentRole ? " · " + currentRole : "");
     applyRolePermissions();
+    applyPlanFeatures();
+    applySubscription(me.sub_status, me.expires_at);
     hideLogin();
     loadGreetingSettings();
   } catch { showLogin(); }
 }
 
 let currentRole = "member";
+let currentFeatures = {};
 function canManage() { return currentRole === "owner" || currentRole === "admin"; }
 
 function applyRolePermissions() {
   // Member tidak boleh ubah pengaturan sapaan
   const gs = $("#greetingSaveBtn");
   if (gs) gs.style.display = canManage() ? "" : "none";
+}
+
+function applyPlanFeatures() {
+  // Sembunyikan mode TANDA TANGAN jika paket tidak mendukung
+  const sigToggle = document.querySelector('.segmented button[data-mode="sign"]');
+  if (sigToggle) sigToggle.style.display = currentFeatures.signature ? "" : "none";
+}
+
+function applySubscription(status, expiresAt) {
+  const banner = $("#subBanner");
+  if (status === "grace") {
+    const tgl = expiresAt ? new Date(expiresAt).toLocaleDateString("id-ID", { dateStyle: "medium" }) : "";
+    banner.textContent = `⚠ Langganan berakhir ${tgl} dan sedang dalam masa tenggang. Segera perpanjang agar akses tidak terkunci.`;
+    banner.style.display = "block";
+  } else {
+    banner.style.display = "none";
+  }
+}
+
+function showLock(msg) {
+  $("#lockMsg").textContent = msg;
+  $("#lockOverlay").classList.remove("hidden");
 }
 
 $("#loginBtn").addEventListener("click", async () => {
@@ -539,6 +586,7 @@ $("#loginPassword").addEventListener("keydown", (e) => {
 });
 
 $("#logoutBtn").addEventListener("click", logout);
+$("#lockLogoutBtn").addEventListener("click", logout);
 
 initAuth();
 
