@@ -1,7 +1,11 @@
 -- ============================================================
 -- Migration: Tabel catatan untuk orang terdaftar
--- Jalankan di: Supabase Dashboard > SQL Editor
+-- Jalankan di PostgreSQL (psql, DBeaver, atau Railway DB)
+-- Pastikan tabel organizations dan users sudah ada
 -- ============================================================
+
+-- Pastikan pgvector ada (wajib untuk face embedding)
+create extension if not exists vector;
 
 -- Tabel catatan per orang
 create table if not exists person_notes (
@@ -20,6 +24,3 @@ create table if not exists person_notes (
 -- Index untuk query cepat per org + person
 create index if not exists person_notes_org_person_idx
   on person_notes (org_id, person_name);
-
--- Enable RLS
-alter table person_notes enable row level security;
