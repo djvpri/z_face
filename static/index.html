@@ -193,6 +193,36 @@
   .person-row .btn-save { color: var(--match); border-color: var(--match); }
   .person-row .btn-save:hover { background: var(--match); color: #fff; }
   .person-row .btn-cancel { color: var(--muted); }
+
+  .btn-notes {
+    background: none; border: 1px solid var(--line); border-radius: 6px;
+    font-family: var(--mono); font-size: 0.68rem; padding: 5px 10px;
+    color: var(--accent); cursor: pointer; margin-left: 6px;
+  }
+  .btn-notes:hover { border-color: var(--accent); background: var(--accent-soft); }
+  .btn-notes.has-notes { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+
+  .note-item {
+    padding: 10px 4px; border-bottom: 1px solid var(--line);
+  }
+  .note-item .note-meta {
+    font-family: var(--mono); font-size: 0.68rem; color: var(--muted); margin-bottom: 4px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .note-item .note-text { font-size: 0.85rem; line-height: 1.5; word-break: break-word; }
+  .note-item .note-file {
+    display: inline-flex; align-items: center; gap: 4px;
+    margin-top: 6px; font-family: var(--mono); font-size: 0.72rem;
+    padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px;
+    text-decoration: none; color: var(--ink); background: var(--bg);
+  }
+  .note-item .note-file:hover { border-color: var(--accent); color: var(--accent); }
+  .note-item .btn-delete-note {
+    background: none; border: none; color: var(--nomatch); font-size: 0.68rem;
+    font-family: var(--mono); cursor: pointer; padding: 2px 6px; border-radius: 4px;
+  }
+  .note-item .btn-delete-note:hover { background: #F6E3D7; }
+
   .person-edit { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .person-edit select, .person-edit input[type=text] {
     border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
@@ -484,6 +514,28 @@
     <div class="camera-actions">
       <button class="btn" id="captureBtn" type="button">AMBIL FOTO</button>
       <button class="btn secondary" id="closeCameraBtn" type="button">TUTUP</button>
+    </div>
+  </div>
+</div>
+
+<div class="camera-modal" id="notesModal">
+  <div class="camera-box" style="max-width:540px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="font-family:var(--display);font-size:1.1rem;font-weight:700;" id="notesModalTitle">Catatan</h2>
+      <button class="btn secondary" id="closeNotesBtn" type="button" style="padding:6px 14px;font-size:0.7rem;width:auto;margin:0">TUTUP</button>
+    </div>
+    <div id="notesList" style="max-height:300px;overflow-y:auto;margin-bottom:14px">
+      <div class="empty">Memuat catatan...</div>
+    </div>
+    <div style="border-top:1px solid var(--line);padding-top:12px">
+      <textarea id="notesInput" rows="3" placeholder="Tulis catatan..." style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:0.85rem;font-family:var(--body);background:var(--bg);resize:vertical" maxlength="500"></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+        <button class="btn" id="uploadFileBtn" type="button" style="padding:10px 14px;font-size:0.78rem;width:auto;margin:0">PILIH FILE</button>
+        <input type="file" id="notesFile" accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx,.txt" hidden>
+        <span id="fileLabel" style="font-size:0.75rem;color:var(--muted);font-family:var(--mono)"></span>
+        <button class="btn" id="saveNoteBtn" type="button" style="padding:10px 20px;font-size:0.78rem;width:auto;margin:0;margin-left:auto">SIMPAN</button>
+      </div>
+      <div class="msg" id="notesMsg"></div>
     </div>
   </div>
 </div>
@@ -856,7 +908,13 @@ function renderSigResults(d) {
       <div class="pct">kemiripan ${pct}%</div>
       <div class="meter"><i style="width:${Math.min(100, pct)}%"></i></div>
       ${alts ? `<div class="alts">Kandidat lain: ${alts}</div>` : ""}
+      <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn-notes" data-name="${d.best.name}" type="button">📝 CATATAN</button>
+      </div>
     </div>`;
+    box.querySelector(".btn-notes").addEventListener("click", function() {
+      openNotesModal(this.dataset.name);
+    });
   } else {
     box.innerHTML = `<div class="result-card unknown">
       <h3>Tidak dikenal</h3>
@@ -910,10 +968,13 @@ function renderResults(faces) {
       const pct = (f.best.similarity * 100).toFixed(1);
       const alts = f.matches.slice(1).map((m) => `${m.name} (${(m.similarity * 100).toFixed(1)}%)`).join(" · ");
       return `<div class="result-card" id="face-card-${i}">
-        <h3>Wajah ${i + 1}: ${f.best.name}</h3>
+        <h3 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">Wajah ${i + 1}: ${f.best.name}</h3>
         <div class="pct">kemiripan ${pct}% · deteksi ${f.det_score}</div>
         <div class="meter"><i style="width:${pct}%"></i></div>
         ${alts ? `<div class="alts">kandidat lain: ${alts}</div>` : ""}
+        <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn-notes" data-name="${f.best.name}" type="button">📝 CATATAN</button>
+        </div>
       </div>`;
     }
     return `<div class="result-card unknown" id="face-card-${i}">
@@ -930,6 +991,9 @@ function renderResults(faces) {
 
   box.querySelectorAll(".quick-reg button").forEach((btn) => {
     btn.addEventListener("click", () => registerFaceFromResult(Number(btn.dataset.idx)));
+  });
+  box.querySelectorAll(".btn-notes").forEach((btn) => {
+    btn.addEventListener("click", () => openNotesModal(btn.dataset.name));
   });
 }
 
@@ -964,6 +1028,16 @@ async function registerFaceFromResult(idx) {
     card.classList.remove("unknown");
     card.querySelector("h3").textContent = `Wajah ${idx + 1}: ${name}`;
     card.querySelector(".quick-reg").remove();
+    // Tambah tombol catatan
+    const notesDiv = document.createElement("div");
+    notesDiv.style.cssText = "margin-top:10px;display:flex;gap:6px;flex-wrap:wrap";
+    const notesBtn = document.createElement("button");
+    notesBtn.className = "btn-notes";
+    notesBtn.textContent = "📝 CATATAN";
+    notesBtn.dataset.name = name;
+    notesBtn.addEventListener("click", () => openNotesModal(name));
+    notesDiv.appendChild(notesBtn);
+    card.appendChild(notesDiv);
   } catch (err) {
     msg.textContent = err.message;
     msg.className = "quick-reg-msg err";
@@ -1681,7 +1755,10 @@ function renderPeople(term) {
         <div>${badge}${exBadge}<b>${p.name}</b></div>
         <div class="meta">${p.photos} foto terdaftar</div>
       </div>
-      ${actions}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <button class="btn-notes" data-name="${enc}" type="button" style="margin:0">📝 CATATAN</button>
+        ${actions}
+      </div>
     </div>`;
   }).join("");
 
@@ -1693,6 +1770,8 @@ function renderPeople(term) {
         apiFetch("/api/people/" + b.dataset.name, { method: "DELETE" }).then(loadPeople).catch(() => {});
       } else if (b.dataset.action === "edit") {
         openEditPerson(b.closest(".person-row"), name, b.dataset.title, b.dataset.exempt === "1");
+      } else if (b.classList.contains("btn-notes")) {
+        openNotesModal(name);
       }
     });
   });
@@ -1737,6 +1816,113 @@ function openEditPerson(row, name, currentTitle, currentExempt) {
     });
   });
 }
+
+// ---------- Notes (catatan) ----------
+let currentNotePerson = "";
+let currentNoteFile = null;
+
+function openNotesModal(personName) {
+  currentNotePerson = personName;
+  currentNoteFile = null;
+  $("#notesModalTitle").textContent = `Catatan — ${personName}`;
+  $("#notesInput").value = "";
+  $("#fileLabel").textContent = "";
+  $("#notesMsg").className = "msg";
+  $("#notesList").innerHTML = '<div class="empty">Memuat catatan...</div>';
+  $("#notesModal").classList.add("open");
+  loadNotes(personName);
+}
+
+function closeNotesModal() {
+  $("#notesModal").classList.remove("open");
+  currentNotePerson = "";
+  currentNoteFile = null;
+}
+
+$("#closeNotesBtn").addEventListener("click", closeNotesModal);
+$("#notesModal").addEventListener("click", (e) => {
+  if (e.target === $("#notesModal")) closeNotesModal();
+});
+
+$("#uploadFileBtn").addEventListener("click", () => $("#notesFile").click());
+$("#notesFile").addEventListener("change", () => {
+  const f = $("#notesFile").files[0];
+  if (f) {
+    currentNoteFile = f;
+    $("#fileLabel").textContent = f.name;
+  }
+});
+
+async function loadNotes(personName) {
+  try {
+    const r = await apiFetch(`/api/people/${encodeURIComponent(personName)}/notes`);
+    const d = await r.json();
+    const box = $("#notesList");
+    if (!d.notes || !d.notes.length) {
+      box.innerHTML = '<div class="empty">Belum ada catatan.</div>';
+      return;
+    }
+    box.innerHTML = d.notes.map(n => {
+      const waktu = new Date(n.created_at).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+      const fileLink = n.file_url ? `<a class="note-file" href="${n.file_url}" target="_blank">📎 ${n.file_name}</a>` : "";
+      const delBtn = canManage() ? `<button class="btn-delete-note" data-id="${n.id}">✕ hapus</button>` : "";
+      return `<div class="note-item">
+        <div class="note-meta"><span>${waktu}</span>${delBtn}</div>
+        ${n.note ? `<div class="note-text">${escapeHtml(n.note)}</div>` : ""}
+        ${fileLink}
+      </div>`;
+    }).join("");
+    box.querySelectorAll(".btn-delete-note").forEach(btn => {
+      btn.addEventListener("click", () => deleteNote(btn.dataset.id));
+    });
+  } catch {
+    $("#notesList").innerHTML = '<div class="empty">Gagal memuat catatan.</div>';
+  }
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+async function deleteNote(noteId) {
+  if (!confirm("Hapus catatan ini?")) return;
+  try {
+    await apiFetch(`/api/people/${encodeURIComponent(currentNotePerson)}/notes/${noteId}`, { method: "DELETE" });
+    loadNotes(currentNotePerson);
+  } catch { alert("Gagal menghapus catatan."); }
+}
+
+$("#saveNoteBtn").addEventListener("click", async () => {
+  const btn = $("#saveNoteBtn");
+  const msg = $("#notesMsg");
+  const text = $("#notesInput").value.trim();
+  if (!text && !currentNoteFile) {
+    msg.className = "msg err"; msg.textContent = "Isi catatan atau pilih file"; return;
+  }
+  btn.disabled = true; btn.textContent = "MENYIMPAN…";
+  msg.className = "msg";
+  try {
+    const fd = new FormData();
+    fd.append("note", text);
+    if (currentNoteFile) fd.append("file", currentNoteFile);
+    const r = await apiFetch(`/api/people/${encodeURIComponent(currentNotePerson)}/notes`, {
+      method: "POST", body: fd,
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Gagal menyimpan");
+    msg.className = "msg ok"; msg.textContent = "Catatan tersimpan.";
+    $("#notesInput").value = "";
+    $("#fileLabel").textContent = "";
+    currentNoteFile = null;
+    loadNotes(currentNotePerson);
+  } catch (e) {
+    msg.className = "msg err"; msg.textContent = e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = "SIMPAN";
+  }
+});
 
 // ---------- PWA ----------
 if ("serviceWorker" in navigator) {

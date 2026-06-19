@@ -884,6 +884,95 @@ def delete_person(name: str, session: dict = Depends(get_session)):
     return {"deleted_name": name, "deleted_entries": len(rows)}
 
 
+# ----- Notes (catatan + file) endpoints -----
+
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+class NoteRequest(BaseModel):
+    note: str = ""
+
+
+@app.get("/api/people/{name}/notes")
+def list_notes(name: str, session: dict = Depends(get_session)):
+    """Ambil semua catatan + file untuk satu orang."""
+    rows = db_all(
+        "SELECT id, note, file_url, file_name, COALESCE(file_type,'') AS file_type, "
+        "created_at, updated_at "
+        "FROM person_notes WHERE org_id = %s::uuid AND person_name = %s "
+        "ORDER BY created_at DESC",
+        (session["org_id"], name),
+    )
+    for r in rows:
+        r["id"] = str(r["id"])
+    return {"notes": rows}
+
+
+@app.post("/api/people/{name}/notes")
+async def create_note(
+    name: str,
+    note: str = Form(""),
+    file: UploadFile | None = File(None),
+    session: dict = Depends(get_session),
+):
+    """Tambah catatan dan/atau file untuk satu orang."""
+    name = name.strip()
+    if not note.strip() and not file:
+        raise HTTPException(400, "Isi catatan atau upload file")
+
+    file_url = None
+    file_name = None
+    file_type = None
+
+    if file and file.filename:
+        ext = os.path.splitext(file.filename)[1].lower()
+        allowed_ext = {".jpg", ".jpeg", ".png", ".gif", ".pdf", ".doc", ".docx", ".txt"}
+        if ext not in allowed_ext:
+            raise HTTPException(400, f"Tipe file {ext} tidak diizinkan. Gunakan: JPG, PNG, GIF, PDF, DOC, DOCX, TXT")
+        safe_name = f"{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')}_{os.path.basename(file.filename)}"
+        dest = os.path.join(UPLOAD_DIR, safe_name)
+        content = await file.read()
+        max_size = 5 * 1024 * 1024  # 5MB
+        if len(content) > max_size:
+            raise HTTPException(400, "File terlalu besar. Maksimal 5MB.")
+        with open(dest, "wb") as f:
+            f.write(content)
+        file_url = f"/uploads/{safe_name}"
+        file_name = file.filename
+        file_type = ext
+
+    rows = db_run(
+        "INSERT INTO person_notes (org_id, person_name, note, file_url, file_name, file_type, created_by) "
+        "VALUES (%s::uuid, %s, %s, %s, %s, %s, %s::uuid) RETURNING id, created_at",
+        (session["org_id"], name, note.strip(), file_url, file_name, file_type, session["user_id"]),
+    )
+    log_audit(session["user_id"], "add_note", f"{name}: {note.strip()[:50]}", session["org_id"])
+    return {"id": str(rows[0]["id"]), "note": note.strip(), "file_url": file_url, "created_at": rows[0]["created_at"]}
+
+
+@app.delete("/api/people/{name}/notes/{note_id}")
+def delete_note(name: str, note_id: str, session: dict = Depends(get_session)):
+    """Hapus catatan + file fisiknya (admin/owner saja)."""
+    require_role(session, MANAGE_ROLES)
+    row = db_one(
+        "SELECT file_url FROM person_notes WHERE id = %s::uuid AND org_id = %s::uuid",
+        (note_id, session["org_id"]),
+    )
+    if not row:
+        raise HTTPException(404, "Catatan tidak ditemukan")
+    if row.get("file_url"):
+        fpath = os.path.join(os.path.dirname(__file__), row["file_url"].lstrip("/"))
+        if os.path.exists(fpath):
+            os.remove(fpath)
+    db_run(
+        "DELETE FROM person_notes WHERE id = %s::uuid AND org_id = %s::uuid",
+        (note_id, session["org_id"]),
+    )
+    log_audit(session["user_id"], "delete_note", f"{name}", session["org_id"])
+    return {"deleted": note_id}
+
+
 # ----- Signature (tanda tangan) endpoints -----
 
 @app.post("/api/signatures/identify")
@@ -980,6 +1069,7 @@ def delete_signature(name: str, session: dict = Depends(get_session)):
 # ----- Static UI -----
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 
 @app.get("/")
