@@ -682,9 +682,26 @@ async def register_face(
     face = largest_face(faces)
     embedding = face.normed_embedding.astype(float).tolist()
 
+    # Buat thumbnail base64 dari wajah yang didaftarkan
+    import base64
+    try:
+        x1, y1, x2, y2 = [int(v) for v in face.bbox]
+        pad = int(max(x2 - x1, y2 - y1) * 0.25)
+        h_img, w_img = img.shape[:2]
+        sx = max(0, x1 - pad)
+        sy = max(0, y1 - pad)
+        ex = min(w_img, x2 + pad)
+        ey = min(h_img, y2 + pad)
+        crop = img[sy:ey, sx:ex]
+        thumb = cv2.resize(crop, (96, 96), interpolation=cv2.INTER_AREA)
+        _, buf = cv2.imencode(".jpg", thumb, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        photo_b64 = base64.b64encode(buf).decode()
+    except Exception:
+        photo_b64 = None
+
     rows = db_run(
-        "INSERT INTO faces (name, embedding, org_id) VALUES (%s, %s::vector, %s::uuid) RETURNING id",
-        (name, vec(embedding), org_id),
+        "INSERT INTO faces (name, embedding, org_id, photo) VALUES (%s, %s::vector, %s::uuid, %s) RETURNING id",
+        (name, vec(embedding), org_id, photo_b64),
     )
     return {
         "id": str(rows[0]["id"]),
@@ -810,7 +827,7 @@ def update_settings(body: SettingsRequest, session: dict = Depends(get_session))
 def list_people(session: dict = Depends(get_session)):
     """Daftar orang terdaftar, dikelompokkan per nama."""
     rows = db_all(
-        "SELECT id, name, title, greet_exempt, created_at FROM faces WHERE org_id = %s::uuid ORDER BY created_at DESC",
+        "SELECT id, name, title, greet_exempt, created_at, photo FROM faces WHERE org_id = %s::uuid ORDER BY created_at DESC",
         (session["org_id"],),
     )
     grouped: dict[str, dict] = {}
@@ -823,7 +840,7 @@ def list_people(session: dict = Depends(get_session)):
             "entries": [],
         })
         g["photos"] += 1
-        g["entries"].append({"id": str(row["id"]), "created_at": row["created_at"]})
+        g["entries"].append({"id": str(row["id"]), "created_at": row["created_at"], "photo": row.get("photo")})
     return {"total_entries": len(rows), "people": list(grouped.values())}
 
 
