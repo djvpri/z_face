@@ -361,7 +361,26 @@
     <label for="loginPassword">PASSWORD</label>
     <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
     <button class="btn" id="loginBtn" type="button">MASUK</button>
+    <div style="text-align:center;margin:16px 0;position:relative">
+      <div style="border-top:1px solid var(--line)"></div>
+      <span style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);background:var(--surface);padding:0 10px;font-family:var(--mono);font-size:0.7rem;color:var(--muted)">ATAU</span>
+    </div>
+    <button class="btn secondary" id="faceLoginBtn" type="button" style="margin-top:0">📷 LOGIN DENGAN WAJAH</button>
     <div class="msg" id="loginMsg"></div>
+  </div>
+</div>
+
+<!-- Face Login Camera Modal -->
+<div class="camera-modal" id="faceLoginModal">
+  <div class="camera-box" style="text-align:center">
+    <p style="font-family:var(--mono);font-size:0.78rem;color:var(--muted);margin-bottom:12px">Arahkan wajah ke kamera</p>
+    <video id="faceLoginVideo" autoplay playsinline muted style="width:100%;max-height:60vh;object-fit:cover;border-radius:8px;background:#000;display:block"></video>
+    <canvas id="faceLoginCanvas" hidden></canvas>
+    <div class="camera-actions" style="justify-content:center">
+      <button class="btn" id="faceLoginCapture" type="button">LOGIN</button>
+      <button class="btn secondary" id="faceLoginClose" type="button">BATAL</button>
+    </div>
+    <div class="msg" id="faceLoginMsg"></div>
   </div>
 </div>
 
@@ -719,6 +738,73 @@ $("#loginBtn").addEventListener("click", async () => {
 
 $("#loginPassword").addEventListener("keydown", (e) => {
   if (e.key === "Enter") $("#loginBtn").click();
+});
+
+// ---------- Face Login ----------
+let faceLoginStream = null;
+
+$("#faceLoginBtn").addEventListener("click", async () => {
+  const msg = $("#loginMsg");
+  msg.className = "msg";
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    msg.className = "msg err"; msg.textContent = "Browser tidak mendukung akses kamera"; return;
+  }
+
+  try {
+    faceLoginStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } })
+      .catch(() => navigator.mediaDevices.getUserMedia({ video: true }));
+    $("#faceLoginVideo").srcObject = faceLoginStream;
+    $("#faceLoginModal").classList.add("open");
+    msg.className = "msg";
+  } catch (err) {
+    msg.className = "msg err"; msg.textContent = "Tidak bisa mengakses kamera: " + err.message;
+  }
+});
+
+$("#faceLoginClose").addEventListener("click", () => {
+  $("#faceLoginModal").classList.remove("open");
+  if (faceLoginStream) { faceLoginStream.getTracks().forEach(t => t.stop()); faceLoginStream = null; }
+});
+
+$("#faceLoginCapture").addEventListener("click", async () => {
+  const btn = $("#faceLoginCapture");
+  const msg = $("#faceLoginMsg");
+  const video = $("#faceLoginVideo");
+  const canvas = $("#faceLoginCanvas");
+
+  if (!video.videoWidth) { msg.className = "msg err"; msg.textContent = "Kamera belum aktif"; return; }
+
+  btn.disabled = true; btn.textContent = "MEMPROSES…";
+  msg.className = "msg";
+
+  try {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.9));
+
+    const fd = new FormData();
+    fd.append("file", new File([blob], "login.jpg", { type: "image/jpeg" }));
+
+    const r = await fetch("/api/auth/face-login", { method: "POST", body: fd });
+    const d = await r.json();
+
+    if (!r.ok) {
+      msg.className = "msg err";
+      msg.textContent = r.status === 401 ? "Wajah tidak dikenal" : (d.detail || "Login gagal");
+      return;
+    }
+
+    localStorage.setItem("zface_token", d.access_token);
+    $("#faceLoginModal").classList.remove("open");
+    if (faceLoginStream) { faceLoginStream.getTracks().forEach(t => t.stop()); faceLoginStream = null; }
+    initAuth();
+  } catch (err) {
+    msg.className = "msg err"; msg.textContent = "Tidak dapat terhubung ke server";
+  } finally {
+    btn.disabled = false; btn.textContent = "LOGIN";
+  }
 });
 
 $("#logoutBtn").addEventListener("click", logout);
