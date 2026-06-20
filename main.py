@@ -547,6 +547,73 @@ def verify_face_token(token: str = Form(...)):
         "expires_at": payload.get("exp"),
     }
 
+@app.post("/api/register-public")
+async def register_face_public(
+    name: str = Form(...),
+    file: UploadFile = File(...),
+    org_id: str = Form(default=""),
+):
+    """
+    Public endpoint for face registration (no auth required).
+    Used by ZOne during user registration.
+    If org_id is empty, uses the first available org.
+    """
+    name = name.strip()
+    if not name:
+        raise HTTPException(400, "Nama tidak boleh kosong")
+    
+    # Find org to use
+    if org_id:
+        org = db_one("SELECT id, quota_faces, plan FROM organizations WHERE id = %s::uuid", (org_id,))
+    else:
+        org = db_one("SELECT id, quota_faces, plan FROM organizations ORDER BY created_at LIMIT 1")
+    
+    if not org:
+        raise HTTPException(404, "Organization not found")
+    
+    org_id = str(org["id"])
+    
+    # Check quota
+    count_row = db_one("SELECT COUNT(*) AS cnt FROM faces WHERE org_id = %s::uuid", (org_id,))
+    quota = org.get("quota_faces")
+    count = int(count_row["cnt"]) if count_row else 0
+    if quota and count >= quota:
+        raise HTTPException(400, f"Kuota wajah ({quota}) sudah penuh")
+    
+    # Detect face
+    img = await read_image(file)
+    faces = detect_faces(img)
+    if not faces:
+        raise HTTPException(400, "Wajah tidak terdeteksi")
+    
+    face = largest_face(faces)
+    embedding = face.normed_embedding.astype(float).tolist()
+    
+    # Check duplicate
+    dup = db_one(
+        "SELECT id, name FROM faces WHERE org_id=%s::uuid AND name=%s",
+        (org_id, name),
+    )
+    
+    if dup:
+        # Update existing face
+        db_exec(
+            "UPDATE faces SET embedding=%s::vector, updated_at=now() WHERE id=%s::uuid",
+            (vec(embedding), str(dup["id"])),
+        )
+        face_id = str(dup["id"])
+        log_audit("register", "face_update", f"{name} (pub)", org_id)
+    else:
+        # Insert new face
+        rows = db_all(
+            "INSERT INTO faces (name,embedding,org_id) VALUES (%s,%s::vector,%s::uuid) RETURNING id",
+            (name, vec(embedding), org_id),
+        )
+        face_id = str(rows[0]["id"])
+        log_audit("register", "face_add", f"{name} (pub)", org_id)
+    
+    return {"id": face_id, "face_id": face_id, "name": name, "org_id": org_id}
+
 # ----- Admin endpoints -----
 
 class OrgCreateRequest(BaseModel):
