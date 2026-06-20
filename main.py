@@ -397,29 +397,16 @@ FACE_LOGIN_EXPIRY = 5 * 60  # 5 minutes
 @app.post("/api/auth/face-login")
 async def face_login(
     file: UploadFile = File(...),
-    org_id: str = Form(...),
+    org_id: str = Form(default=""),
     threshold: float = Form(0.45),
 ):
     """
     Public endpoint for face login across apps.
-    Takes a photo + org_id, identifies the face, returns a short-lived JWT token.
-    Other apps can verify this token to create their own session.
+    Takes a photo, identifies the face, returns a short-lived JWT token.
+    If org_id is empty, searches across ALL organizations.
     """
     if not FACE_LOGIN_SECRET:
         raise HTTPException(503, "Face login not configured")
-    
-    # Validate org exists and is active
-    org = db_one("SELECT id, name, plan, active, expires_at FROM organizations WHERE id = %s::uuid", (org_id,))
-    if not org:
-        raise HTTPException(404, "Organization not found")
-    if not org.get("active"):
-        raise HTTPException(403, "Organization is inactive")
-    
-    # Check subscription
-    if org.get("expires_at"):
-        now = datetime.datetime.now(datetime.timezone.utc)
-        if now > org["expires_at"] + datetime.timedelta(days=GRACE_DAYS):
-            raise HTTPException(402, "Organization subscription expired")
     
     # Detect face
     img = await read_image(file)
@@ -432,10 +419,18 @@ async def face_login(
     embedding = face.normed_embedding.astype(float).tolist()
     
     # Match against registered faces
-    rows = db_all(
-        "SELECT * FROM match_faces(%s::vector, %s, 1, %s::uuid)",
-        (vec(embedding), threshold, org_id),
-    )
+    if org_id:
+        # Search in specific org
+        rows = db_all(
+            "SELECT * FROM match_faces(%s::vector, %s, 1, %s::uuid)",
+            (vec(embedding), threshold, org_id),
+        )
+    else:
+        # Search across ALL organizations
+        rows = db_all(
+            "SELECT * FROM match_faces_all_orgs(%s::vector, %s, 1)",
+            (vec(embedding), threshold),
+        )
     
     if not rows:
         raise HTTPException(401, "Face not recognized")
@@ -443,22 +438,28 @@ async def face_login(
     best_match = rows[0]
     person_name = best_match["name"]
     similarity = float(best_match["similarity"])
+    matched_org_id = str(best_match["org_id"])
+    
+    # Get org info
+    org = db_one("SELECT id, name, plan, active FROM organizations WHERE id = %s::uuid", (matched_org_id,))
+    if not org:
+        raise HTTPException(404, "Organization not found")
     
     # Create face login token (short-lived)
     token_payload = {
         "sub": str(best_match["id"]),
         "person_name": person_name,
-        "org_id": org_id,
+        "org_id": matched_org_id,
         "org_name": org.get("name", ""),
         "similarity": round(similarity, 4),
-        "face_login": True,  # Flag to distinguish from regular auth
+        "face_login": True,
         "exp": datetime.datetime.utcnow() + datetime.timedelta(seconds=FACE_LOGIN_EXPIRY),
         "iat": datetime.datetime.utcnow(),
     }
     token = jwt.encode(token_payload, FACE_LOGIN_SECRET, algorithm="HS256")
     
-    # Log the face login attempt
-    log_audit("face-login", "face_login", f"{person_name} ({similarity:.2%})", org_id)
+    # Log
+    log_audit("face-login", "face_login", f"{person_name} ({similarity:.2%})", matched_org_id)
     
     return {
         "access_token": token,
@@ -469,7 +470,7 @@ async def face_login(
             "similarity": round(similarity, 4),
         },
         "org": {
-            "id": org_id,
+            "id": matched_org_id,
             "name": org.get("name", ""),
         },
     }
