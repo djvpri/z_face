@@ -27,6 +27,7 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 JWT_SECRET = os.getenv("JWT_SECRET", "")
 ADMIN_KEY = os.getenv("ADMIN_KEY", "")
+CROSS_APP_SECRET = os.getenv("CROSS_APP_SECRET", "z-ecosystem-admin-2026")
 # Domain yang boleh akses API (pisahkan dengan koma). Kosong = hanya same-origin
 # (app web disajikan dari server yang sama, jadi tidak butuh CORS lintas-domain).
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
@@ -744,6 +745,38 @@ def admin_list_orgs(_=Depends(require_admin)):
     rows = db_all("SELECT * FROM organizations ORDER BY created_at")
     return {"organizations": rows}
 
+
+@app.get("/api/admin/cross-app")
+def cross_app_list_persons(authorization: str = Header(default="")):
+    """Cross-app endpoint for ZOne admin panel. Lists all people with face counts."""
+    expected = f"Bearer {CROSS_APP_SECRET}"
+    if authorization != expected:
+        raise HTTPException(401, "Unauthorized")
+
+    rows = db_all(
+        "SELECT id, name, org_id, created_at FROM faces ORDER BY created_at DESC",
+    )
+
+    # Group by name
+    grouped: dict[str, dict] = {}
+    for r in rows:
+        name = r["name"]
+        g = grouped.setdefault(name, {
+            "name": name,
+            "org_id": str(r["org_id"]) if r.get("org_id") else "",
+            "faces": 0,
+            "created_at": str(r["created_at"]),
+            "source": "zface",
+        })
+        g["faces"] += 1
+
+    users = sorted(grouped.values(), key=lambda x: x["created_at"], reverse=True)
+
+    return {
+        "users": users,
+        "total": len(users),
+        "total_faces": len(rows),
+    }
 
 @app.get("/api/admin/audit")
 def admin_audit(limit: int = 100, _=Depends(require_admin)):
