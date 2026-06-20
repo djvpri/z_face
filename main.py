@@ -801,7 +801,7 @@ def _cross_app_data():
 
 
 @app.post("/api/admin/cross-app")
-def cross_app_action(authorization: str = Header(default="")):
+def cross_app_action(request: Request, authorization: str = Header(default="")):
     """Cross-app POST actions for ZOne admin panel."""
     expected = f"Bearer {CROSS_APP_SECRET}"
     if authorization != expected:
