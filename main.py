@@ -389,6 +389,119 @@ def change_password(body: ChangePasswordRequest, session: dict = Depends(get_ses
     return {"ok": True}
 
 
+# ----- Face Login (public endpoint for cross-app integration) -----
+
+FACE_LOGIN_SECRET = os.getenv("FACE_LOGIN_SECRET", JWT_SECRET)  # Can use same or different secret
+FACE_LOGIN_EXPIRY = 5 * 60  # 5 minutes
+
+@app.post("/api/auth/face-login")
+async def face_login(
+    file: UploadFile = File(...),
+    org_id: str = Form(...),
+    threshold: float = Form(0.45),
+):
+    """
+    Public endpoint for face login across apps.
+    Takes a photo + org_id, identifies the face, returns a short-lived JWT token.
+    Other apps can verify this token to create their own session.
+    """
+    if not FACE_LOGIN_SECRET:
+        raise HTTPException(503, "Face login not configured")
+    
+    # Validate org exists and is active
+    org = db_one("SELECT id, name, plan, active, expires_at FROM organizations WHERE id = %s::uuid", (org_id,))
+    if not org:
+        raise HTTPException(404, "Organization not found")
+    if not org.get("active"):
+        raise HTTPException(403, "Organization is inactive")
+    
+    # Check subscription
+    if org.get("expires_at"):
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if now > org["expires_at"] + datetime.timedelta(days=GRACE_DAYS):
+            raise HTTPException(402, "Organization subscription expired")
+    
+    # Detect face
+    img = await read_image(file)
+    faces = detect_faces(img)
+    
+    if not faces:
+        raise HTTPException(400, "No face detected in photo")
+    
+    face = largest_face(faces)
+    embedding = face.normed_embedding.astype(float).tolist()
+    
+    # Match against registered faces
+    rows = db_all(
+        "SELECT * FROM match_faces(%s::vector, %s, 1, %s::uuid)",
+        (vec(embedding), threshold, org_id),
+    )
+    
+    if not rows:
+        raise HTTPException(401, "Face not recognized")
+    
+    best_match = rows[0]
+    person_name = best_match["name"]
+    similarity = float(best_match["similarity"])
+    
+    # Create face login token (short-lived)
+    token_payload = {
+        "sub": str(best_match["id"]),
+        "person_name": person_name,
+        "org_id": org_id,
+        "org_name": org.get("name", ""),
+        "similarity": round(similarity, 4),
+        "face_login": True,  # Flag to distinguish from regular auth
+        "exp": datetime.datetime.utcnow() + datetime.timedelta(seconds=FACE_LOGIN_EXPIRY),
+        "iat": datetime.datetime.utcnow(),
+    }
+    token = jwt.encode(token_payload, FACE_LOGIN_SECRET, algorithm="HS256")
+    
+    # Log the face login attempt
+    log_audit("face-login", "face_login", f"{person_name} ({similarity:.2%})", org_id)
+    
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in": FACE_LOGIN_EXPIRY,
+        "person": {
+            "name": person_name,
+            "similarity": round(similarity, 4),
+        },
+        "org": {
+            "id": org_id,
+            "name": org.get("name", ""),
+        },
+    }
+
+@app.post("/api/auth/verify-face-token")
+def verify_face_token(token: str = Form(...)):
+    """
+    Verify a face login token.
+    Used by other apps to verify the token returned by /api/auth/face-login.
+    """
+    if not FACE_LOGIN_SECRET:
+        raise HTTPException(503, "Face login not configured")
+    
+    try:
+        payload = jwt.decode(token, FACE_LOGIN_SECRET, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(401, "Face login token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(401, "Invalid face login token")
+    
+    if not payload.get("face_login"):
+        raise HTTPException(400, "Not a face login token")
+    
+    return {
+        "valid": True,
+        "person_name": payload.get("person_name"),
+        "org_id": payload.get("org_id"),
+        "org_name": payload.get("org_name"),
+        "similarity": payload.get("similarity"),
+        "expires_at": payload.get("exp"),
+    }
+
 # ----- Admin endpoints -----
 
 class OrgCreateRequest(BaseModel):
