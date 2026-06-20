@@ -53,6 +53,49 @@ def plan_features(plan: str) -> dict:
 db_pool: psycopg2.pool.ThreadedConnectionPool | None = None
 if DATABASE_URL:
     db_pool = psycopg2.pool.ThreadedConnectionPool(1, 10, DATABASE_URL)
+    
+    # Auto-create match_faces_all_orgs function if not exists
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE OR REPLACE FUNCTION match_faces_all_orgs(
+                query_embedding vector(512),
+                match_threshold float,
+                match_count int
+            )
+            RETURNS TABLE (
+                id uuid,
+                name text,
+                similarity float,
+                org_id uuid
+            )
+            LANGUAGE plpgsql STABLE
+            AS $$
+            BEGIN
+                RETURN QUERY
+                SELECT
+                    f.id,
+                    f.name,
+                    1 - (f.embedding <=> query_embedding) AS similarity,
+                    f.org_id
+                FROM faces f
+                WHERE 1 - (f.embedding <=> query_embedding) > match_threshold
+                ORDER BY f.embedding <=> query_embedding
+                LIMIT match_count;
+            END;
+            $$;
+        """)
+        conn.commit()
+        cur.close()
+        db_pool.putconn(conn)
+        print("✅ match_faces_all_orgs function ready")
+    except Exception as e:
+        print(f"⚠️ Gagal create match_faces_all_orgs: {e}")
+        try:
+            db_pool.putconn(conn)
+        except:
+            pass
 
 # ----- Model InsightFace -----
 print("Memuat model InsightFace (buffalo_l)...")
