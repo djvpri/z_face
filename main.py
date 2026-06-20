@@ -821,7 +821,6 @@ def cross_app_action(request: Request, authorization: str = Header(default="")):
         if plan not in PLANS:
             raise HTTPException(400, f"Invalid plan: {plan}")
 
-        # Calculate new expiry
         from datetime import datetime, timedelta
         new_expires = datetime.utcnow() + timedelta(days=PLAN_DAYS)
 
@@ -830,6 +829,35 @@ def cross_app_action(request: Request, authorization: str = Header(default="")):
             (plan, new_expires, org_id),
         )
         return {"success": True, "expires_at": str(new_expires)}
+
+    elif action == "createOrg":
+        name = data.get("name")
+        if not name:
+            raise HTTPException(400, "name required")
+        from datetime import datetime, timedelta
+        expires = datetime.utcnow() + timedelta(days=PLAN_DAYS)
+        org = db_one(
+            "INSERT INTO organizations (name, plan, active, expires_at, created_at) VALUES (%s, 'starter', true, %s, NOW()) RETURNING id, name, plan, active, expires_at",
+            (name, expires),
+        )
+        return {"success": True, "organization": dict(org) if org else None}
+
+    elif action == "updateOrg":
+        org_id = data.get("orgId")
+        if not org_id:
+            raise HTTPException(400, "orgId required")
+        db_one(
+            "UPDATE organizations SET name = COALESCE(%s, name), active = COALESCE(%s, active) WHERE id = %s::uuid",
+            (data.get("name"), data.get("active"), org_id),
+        )
+        return {"success": True}
+
+    elif action == "deleteOrg":
+        org_id = data.get("orgId")
+        if not org_id:
+            raise HTTPException(400, "orgId required")
+        db_one("DELETE FROM organizations WHERE id = %s::uuid", (org_id,))
+        return {"success": True}
 
     return {"error": "Unknown action"}
 
