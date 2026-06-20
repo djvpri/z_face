@@ -752,7 +752,10 @@ def cross_app_list_persons(authorization: str = Header(default="")):
     expected = f"Bearer {CROSS_APP_SECRET}"
     if authorization != expected:
         raise HTTPException(401, "Unauthorized")
+    return _cross_app_data()
 
+
+def _cross_app_data():
     rows = db_all(
         "SELECT id, name, org_id, created_at FROM faces ORDER BY created_at DESC",
     )
@@ -772,11 +775,63 @@ def cross_app_list_persons(authorization: str = Header(default="")):
 
     users = sorted(grouped.values(), key=lambda x: x["created_at"], reverse=True)
 
+    # Get organizations with plan info
+    orgs = db_all(
+        "SELECT id, name, plan, active, expires_at, created_at FROM organizations ORDER BY created_at DESC"
+    )
+    organizations = [
+        {
+            "id": str(o["id"]),
+            "name": o["name"],
+            "plan": o["plan"],
+            "active": o["active"],
+            "expires_at": str(o["expires_at"]) if o.get("expires_at") else None,
+            "quota": plan_quota(o["plan"]),
+            "features": plan_features(o["plan"]),
+        }
+        for o in orgs
+    ]
+
     return {
         "users": users,
         "total": len(users),
         "total_faces": len(rows),
+        "organizations": organizations,
     }
+
+
+@app.post("/api/admin/cross-app")
+def cross_app_action(authorization: str = Header(default="")):
+    """Cross-app POST actions for ZOne admin panel."""
+    expected = f"Bearer {CROSS_APP_SECRET}"
+    if authorization != expected:
+        raise HTTPException(401, "Unauthorized")
+
+    import json
+    body = json.loads(request.body.read())
+
+    action = body.get("action")
+    data = body.get("data", {})
+
+    if action == "updatePlan":
+        org_id = data.get("orgId")
+        plan = data.get("plan")
+        if not org_id or not plan:
+            raise HTTPException(400, "orgId and plan required")
+        if plan not in PLANS:
+            raise HTTPException(400, f"Invalid plan: {plan}")
+
+        # Calculate new expiry
+        from datetime import datetime, timedelta
+        new_expires = datetime.utcnow() + timedelta(days=PLAN_DAYS)
+
+        db_one(
+            "UPDATE organizations SET plan = %s, expires_at = %s, active = true WHERE id = %s::uuid",
+            (plan, new_expires, org_id),
+        )
+        return {"success": True, "expires_at": str(new_expires)}
+
+    return {"error": "Unknown action"}
 
 @app.get("/api/admin/audit")
 def admin_audit(limit: int = 100, _=Depends(require_admin)):
