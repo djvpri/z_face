@@ -796,7 +796,7 @@ def _cross_app_data():
         "users": users,
         "total": len(users),
         "total_faces": len(rows),
-        "organizations": organizations,
+        "tenants": organizations,
     }
 
 
@@ -814,10 +814,10 @@ def cross_app_action(request: Request, authorization: str = Header(default="")):
     data = body.get("data", {})
 
     if action == "updatePlan":
-        org_id = data.get("orgId")
+        tenant_id = data.get("tenantId")
         plan = data.get("plan")
-        if not org_id or not plan:
-            raise HTTPException(400, "orgId and plan required")
+        if not tenant_id or not plan:
+            raise HTTPException(400, "tenantId and plan required")
         if plan not in PLANS:
             raise HTTPException(400, f"Invalid plan: {plan}")
 
@@ -826,11 +826,11 @@ def cross_app_action(request: Request, authorization: str = Header(default="")):
 
         db_one(
             "UPDATE organizations SET plan = %s, expires_at = %s, active = true WHERE id = %s::uuid",
-            (plan, new_expires, org_id),
+            (plan, new_expires, tenant_id),
         )
         return {"success": True, "expires_at": str(new_expires)}
 
-    elif action == "createOrg":
+    elif action == "createTenant":
         name = data.get("name")
         if not name:
             raise HTTPException(400, "name required")
@@ -842,21 +842,21 @@ def cross_app_action(request: Request, authorization: str = Header(default="")):
         )
         return {"success": True, "organization": dict(org) if org else None}
 
-    elif action == "updateOrg":
-        org_id = data.get("orgId")
-        if not org_id:
-            raise HTTPException(400, "orgId required")
+    elif action == "updateTenant":
+        tenant_id = data.get("tenantId")
+        if not tenant_id:
+            raise HTTPException(400, "tenantId required")
         db_one(
             "UPDATE organizations SET name = COALESCE(%s, name), active = COALESCE(%s, active) WHERE id = %s::uuid",
-            (data.get("name"), data.get("active"), org_id),
+            (data.get("name"), data.get("active"), tenant_id),
         )
         return {"success": True}
 
-    elif action == "deleteOrg":
-        org_id = data.get("orgId")
-        if not org_id:
-            raise HTTPException(400, "orgId required")
-        db_one("DELETE FROM organizations WHERE id = %s::uuid", (org_id,))
+    elif action == "deleteTenant":
+        tenant_id = data.get("tenantId")
+        if not tenant_id:
+            raise HTTPException(400, "tenantId required")
+        db_one("DELETE FROM organizations WHERE id = %s::uuid", (tenant_id,))
         return {"success": True}
 
     return {"error": "Unknown action"}
