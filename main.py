@@ -508,6 +508,7 @@ async def face_login(
         "access_token": token,
         "token_type": "bearer",
         "expires_in": FACE_LOGIN_EXPIRY,
+        "face_id": str(best_match["id"]),  # Return face_id for linking
         "person": {
             "name": person_name,
             "similarity": round(similarity, 4),
