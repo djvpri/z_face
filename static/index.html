@@ -377,6 +377,7 @@
     <p style="font-family:var(--mono);font-size:0.78rem;color:var(--muted);margin-bottom:12px">Arahkan wajah ke kamera</p>
     <video id="faceLoginVideo" autoplay playsinline muted style="width:100%;max-height:60vh;object-fit:cover;border-radius:8px;background:#000;display:block"></video>
     <canvas id="faceLoginCanvas" hidden></canvas>
+    <select id="faceLoginCameraSelect" hidden></select>
     <div class="camera-actions" style="justify-content:center">
       <button class="btn" id="faceLoginCapture" type="button">LOGIN</button>
       <button class="btn secondary" id="faceLoginClose" type="button">BATAL</button>
@@ -753,9 +754,10 @@ $("#faceLoginBtn").addEventListener("click", async () => {
   }
 
   try {
-    faceLoginStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } })
-      .catch(() => navigator.mediaDevices.getUserMedia({ video: true }));
+    faceLoginStream = await getCameraStream();
     $("#faceLoginVideo").srcObject = faceLoginStream;
+    const deviceId = faceLoginStream.getVideoTracks()[0].getSettings().deviceId;
+    populateCameraSelect($("#faceLoginCameraSelect"), deviceId);
     $("#faceLoginModal").classList.add("open");
     msg.className = "msg";
   } catch (err) {
@@ -763,9 +765,21 @@ $("#faceLoginBtn").addEventListener("click", async () => {
   }
 });
 
+$("#faceLoginCameraSelect").addEventListener("change", async () => {
+  try {
+    const stream = await getCameraStream($("#faceLoginCameraSelect").value);
+    if (faceLoginStream) faceLoginStream.getTracks().forEach((t) => t.stop());
+    faceLoginStream = stream;
+    $("#faceLoginVideo").srcObject = stream;
+  } catch (err) {
+    alert("Tidak bisa beralih kamera: " + err.message);
+  }
+});
+
 $("#faceLoginClose").addEventListener("click", () => {
   $("#faceLoginModal").classList.remove("open");
   if (faceLoginStream) { faceLoginStream.getTracks().forEach(t => t.stop()); faceLoginStream = null; }
+  $("#faceLoginCameraSelect").hidden = true;
 });
 
 $("#faceLoginCapture").addEventListener("click", async () => {
