@@ -767,7 +767,8 @@ $("#faceLoginBtn").addEventListener("click", async () => {
 
 $("#faceLoginCameraSelect").addEventListener("change", async () => {
   try {
-    if (faceLoginStream) { faceLoginStream.getTracks().forEach((t) => t.stop()); faceLoginStream = null; }
+    await stopStreamAndWait(faceLoginStream);
+    faceLoginStream = null;
     const stream = await getCameraStream($("#faceLoginCameraSelect").value);
     faceLoginStream = stream;
     $("#faceLoginVideo").srcObject = stream;
@@ -1454,12 +1455,25 @@ async function populateCameraSelect(selectEl, activeDeviceId) {
 
 async function getCameraStream(deviceId) {
   if (deviceId) {
-    return navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } } });
+    try {
+      return await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } } });
+    } catch (err) {
+      // Beberapa Android butuh jeda sebelum hardware kamera lama benar-benar lepas
+      await new Promise((r) => setTimeout(r, 350));
+      return navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } } });
+    }
   }
   // Default: coba kamera belakang dulu, fallback ke kamera apa pun (mis. laptop)
   return navigator.mediaDevices
     .getUserMedia({ video: { facingMode: { ideal: "environment" } } })
     .catch(() => navigator.mediaDevices.getUserMedia({ video: true }));
+}
+
+async function stopStreamAndWait(stream) {
+  if (!stream) return;
+  stream.getTracks().forEach((t) => t.stop());
+  // Beri waktu OS Android melepas hardware kamera sebelum diminta lagi
+  await new Promise((r) => setTimeout(r, 250));
 }
 
 // ---------- Kamera ----------
@@ -1499,7 +1513,8 @@ function openCamera(onCapture) {
 
 $("#cameraSelect").addEventListener("change", async () => {
   try {
-    if (cameraStream) { cameraStream.getTracks().forEach((t) => t.stop()); cameraStream = null; }
+    await stopStreamAndWait(cameraStream);
+    cameraStream = null;
     const stream = await getCameraStream($("#cameraSelect").value);
     cameraStream = stream;
     $("#cameraVideo").srcObject = stream;
@@ -1595,7 +1610,8 @@ async function startRealtime() {
 
 $("#rtCameraSelect").addEventListener("change", async () => {
   try {
-    if (rtStream) { rtStream.getTracks().forEach((t) => t.stop()); rtStream = null; }
+    await stopStreamAndWait(rtStream);
+    rtStream = null;
     const stream = await getCameraStream($("#rtCameraSelect").value);
     rtStream = stream;
     $("#rtVideo").srcObject = stream;
@@ -1756,7 +1772,8 @@ async function startGuest() {
 
 $("#guestCameraSelect").addEventListener("change", async () => {
   try {
-    if (guestStream) { guestStream.getTracks().forEach((t) => t.stop()); guestStream = null; }
+    await stopStreamAndWait(guestStream);
+    guestStream = null;
     const stream = await getCameraStream($("#guestCameraSelect").value);
     guestStream = stream;
     $("#guestVideo").srcObject = stream;
