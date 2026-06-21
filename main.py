@@ -880,7 +880,9 @@ def cross_app_list_persons(authorization: str = Header(default="")):
 
 def _cross_app_data():
     rows = db_all(
-        "SELECT id, name, org_id, created_at FROM faces ORDER BY created_at DESC",
+        "SELECT f.id, f.name, f.org_id, f.created_at, u.email AS linked_email "
+        "FROM faces f LEFT JOIN users u ON u.id = f.user_id "
+        "ORDER BY f.created_at DESC",
     )
 
     # Group by name
@@ -893,8 +895,11 @@ def _cross_app_data():
             "faces": 0,
             "created_at": str(r["created_at"]),
             "source": "zface",
+            "linked_email": r.get("linked_email"),
         })
         g["faces"] += 1
+        if r.get("linked_email"):
+            g["linked_email"] = r["linked_email"]
 
     users = sorted(grouped.values(), key=lambda x: x["created_at"], reverse=True)
 
