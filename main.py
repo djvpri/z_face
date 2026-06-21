@@ -801,14 +801,14 @@ def _cross_app_data():
 
 
 @app.post("/api/admin/cross-app")
-def cross_app_action(request: Request, authorization: str = Header(default="")):
+async def cross_app_action(request: Request, authorization: str = Header(default="")):
     """Cross-app POST actions for ZOne admin panel."""
     expected = f"Bearer {CROSS_APP_SECRET}"
     if authorization != expected:
         raise HTTPException(401, "Unauthorized")
 
     import json
-    body = json.loads(request.body.read())
+    body = json.loads(await request.body())
 
     action = body.get("action")
     data = body.get("data", {})
