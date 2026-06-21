@@ -275,62 +275,67 @@ export default function LoginPage() {
             </form>
           ) : (
             <div className="space-y-4">
-              {/* Camera Preview */}
-              <div className="relative aspect-video bg-slate-800 rounded-lg overflow-hidden">
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover"
-                />
-                <canvas ref={canvasRef} className="hidden" />
-                
-                {!cameraActive && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-center">
-                      <span className="text-4xl mb-2 block">📷</span>
-                      <p className="text-slate-400 text-sm">Kamera belum aktif</p>
+              {/* Fullscreen camera overlay when active */}
+              {cameraActive && (
+                <div className="fixed inset-0 z-50 bg-black flex flex-col">
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                  />
+                  <canvas ref={canvasRef} className="hidden" />
+                  
+                  {faceStatus && (
+                    <div className="absolute top-0 left-0 right-0 bg-black/60 text-white text-sm p-3 text-center">
+                      {faceStatus}
                     </div>
+                  )}
+                  
+                  <div className="absolute bottom-0 left-0 right-0 p-4 flex gap-2">
+                    <button
+                      onClick={() => { stopCamera(); setFaceStatus('') }}
+                      className="bg-red-600/80 hover:bg-red-600 text-white rounded-lg px-4 py-3 transition-colors text-sm font-medium"
+                    >
+                      ✕ Batal
+                    </button>
+                    <button
+                      onClick={async () => { 
+                        const newFacing = cameraFacing === 'user' ? 'environment' : 'user'
+                        setCameraFacing(newFacing)
+                        streamRef.current?.getTracks().forEach(t => t.stop())
+                        try {
+                          const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: newFacing } })
+                          if (videoRef.current) {
+                            videoRef.current.srcObject = stream
+                            streamRef.current = stream
+                          }
+                        } catch {}
+                      }}
+                      className="bg-slate-700/80 hover:bg-slate-700 text-white rounded-lg px-4 py-3 transition-colors text-sm"
+                    >
+                      {cameraFacing === 'user' ? '📱 Belakang' : '📷 Depan'}
+                    </button>
                   </div>
-                )}
-                
-                {faceStatus && (
-                  <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-sm p-2 text-center">
-                    {faceStatus}
+                </div>
+              )}
+              
+              {!cameraActive && (
+                <>
+                  <div className="text-center py-8">
+                    <span className="text-6xl block mb-4">📷</span>
+                    <p className="text-slate-400 text-sm">Tekan tombol di bawah untuk mulai scan wajah</p>
                   </div>
-                )}
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={async () => { 
-                    const newFacing = cameraFacing === 'user' ? 'environment' : 'user'
-                    setCameraFacing(newFacing)
-                    if (cameraActive) { 
-                      streamRef.current?.getTracks().forEach(t => t.stop())
-                      try {
-                        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: newFacing } })
-                        if (videoRef.current) {
-                          videoRef.current.srcObject = stream
-                          streamRef.current = stream
-                        }
-                      } catch {}
-                    }
-                  }}
-                  className="bg-slate-700 hover:bg-slate-600 text-white rounded-lg px-3 py-2.5 transition-colors text-sm"
-                  title={cameraFacing === 'user' ? 'Ganti kamera belakang' : 'Ganti kamera depan'}
-                >
-                  {cameraFacing === 'user' ? '📱' : '📷'}
-                </button>
-                <button
-                  onClick={handleFaceLogin}
-                  disabled={loading || !modelsLoaded}
-                  className="flex-1 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-medium rounded-lg px-4 py-2.5 transition-colors"
-                >
-                  {!modelsLoaded ? 'Loading models...' : loading ? 'Memproses...' : '📷 Login dengan Wajah'}
-                </button>
-              </div>
+                  <button
+                    onClick={handleFaceLogin}
+                    disabled={loading || !modelsLoaded}
+                    className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-medium rounded-lg px-4 py-3 transition-colors"
+                  >
+                    {!modelsLoaded ? 'Loading models...' : loading ? 'Memproses...' : '📷 Login dengan Wajah'}
+                  </button>
+                </>
+              )}
             </div>
           )}
 
