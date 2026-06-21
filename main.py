@@ -98,6 +98,23 @@ if DATABASE_URL:
         except:
             pass
 
+    # Auto-migrate: kolom user_id di faces (tautkan wajah ke akun login)
+    try:
+        conn = db_pool.getconn()
+        cur = conn.cursor()
+        cur.execute("ALTER TABLE faces ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE SET NULL;")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_faces_user_id ON faces(user_id);")
+        conn.commit()
+        cur.close()
+        db_pool.putconn(conn)
+        print("✅ faces.user_id column ready")
+    except Exception as e:
+        print(f"⚠️ Gagal migrate faces.user_id: {e}")
+        try:
+            db_pool.putconn(conn)
+        except:
+            pass
+
 # ----- Model InsightFace -----
 print("Memuat model InsightFace (buffalo_l)...")
 from insightface.app import FaceAnalysis  # noqa: E402
@@ -484,13 +501,43 @@ async def face_login(
     person_name = best_match["name"]
     similarity = float(best_match["similarity"])
     matched_org_id = str(best_match["org_id"])
-    
+
     # Get org info
     org = db_one("SELECT id, name, plan, active FROM organizations WHERE id = %s::uuid", (matched_org_id,))
     if not org:
         raise HTTPException(404, "Organization not found")
-    
-    # Create face login token (short-lived)
+
+    # Cek apakah wajah ini sudah ditautkan ke akun login (users.id)
+    face_row = db_one("SELECT user_id FROM faces WHERE id = %s::uuid", (best_match["id"],))
+    linked_user_id = str(face_row["user_id"]) if face_row and face_row.get("user_id") else None
+
+    log_audit("face-login", "face_login", f"{person_name} ({similarity:.2%})", matched_org_id)
+
+    if linked_user_id:
+        # Wajah ditautkan ke akun login -> terbitkan token sesi PENUH (sama seperti login email/password)
+        # supaya bisa langsung dipakai masuk dashboard (bukan cuma token cross-app berumur pendek).
+        user_row = db_one("SELECT email FROM users WHERE id = %s::uuid", (linked_user_id,))
+        token = jwt.encode(
+            {
+                "sub": linked_user_id,
+                "email": (user_row or {}).get("email", ""),
+                "exp": datetime.datetime.utcnow() + datetime.timedelta(days=30),
+            },
+            JWT_SECRET,
+            algorithm="HS256",
+        )
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "dashboard_login": True,
+            "face_id": str(best_match["id"]),
+            "person": {"name": person_name, "similarity": round(similarity, 4)},
+            "org": {"id": matched_org_id, "name": org.get("name", "")},
+        }
+
+    # Belum ditautkan ke akun login -> tetap kasih token cross-app berumur pendek
+    # (dipakai aplikasi lain untuk verifikasi via /api/auth/verify-face-token),
+    # tapi TIDAK bisa dipakai login ke dashboard ini.
     token_payload = {
         "sub": str(best_match["id"]),
         "person_name": person_name,
@@ -502,14 +549,12 @@ async def face_login(
         "iat": datetime.datetime.utcnow(),
     }
     token = jwt.encode(token_payload, FACE_LOGIN_SECRET, algorithm="HS256")
-    
-    # Log
-    log_audit("face-login", "face_login", f"{person_name} ({similarity:.2%})", matched_org_id)
-    
+
     return {
         "access_token": token,
         "token_type": "bearer",
         "expires_in": FACE_LOGIN_EXPIRY,
+        "dashboard_login": False,
         "face_id": str(best_match["id"]),  # Return face_id for linking
         "person": {
             "name": person_name,
@@ -1169,7 +1214,9 @@ def update_settings(body: SettingsRequest, session: dict = Depends(get_session))
 def list_people(session: dict = Depends(get_session)):
     """Daftar orang terdaftar, dikelompokkan per nama."""
     rows = db_all(
-        "SELECT id, name, title, greet_exempt, created_at, photo FROM faces WHERE org_id = %s::uuid ORDER BY created_at DESC",
+        "SELECT f.id, f.name, f.title, f.greet_exempt, f.created_at, f.photo, u.email AS linked_email "
+        "FROM faces f LEFT JOIN users u ON u.id = f.user_id "
+        "WHERE f.org_id = %s::uuid ORDER BY f.created_at DESC",
         (session["org_id"],),
     )
     grouped: dict[str, dict] = {}
@@ -1178,6 +1225,7 @@ def list_people(session: dict = Depends(get_session)):
             "name": row["name"],
             "title": row.get("title", ""),
             "greet_exempt": bool(row.get("greet_exempt", False)),
+            "linked_email": row.get("linked_email"),
             "photos": 0,
             "entries": [],
         })
@@ -1190,11 +1238,12 @@ class PersonUpdateRequest(BaseModel):
     new_name: str | None = None
     title: str | None = None
     greet_exempt: bool | None = None
+    link_email: str | None = None  # email akun login untuk ditautkan; "" untuk lepas tautan
 
 
 @app.patch("/api/people/{name}")
 def update_person(name: str, body: PersonUpdateRequest, session: dict = Depends(get_session)):
-    """Ganti nama, gelar, dan/atau status pengecualian sapaan satu orang."""
+    """Ganti nama, gelar, status pengecualian sapaan, dan/atau tautan akun login satu orang."""
     require_role(session, MANAGE_ROLES)
     sets = []
     params: list = []
@@ -1212,6 +1261,22 @@ def update_person(name: str, body: PersonUpdateRequest, session: dict = Depends(
     if body.greet_exempt is not None:
         sets.append("greet_exempt = %s")
         params.append(body.greet_exempt)
+    if body.link_email is not None:
+        email = body.link_email.strip()
+        if not email:
+            sets.append("user_id = NULL")
+        else:
+            user_row = db_one("SELECT id FROM users WHERE email = %s", (email,))
+            if not user_row:
+                raise HTTPException(404, "Akun dengan email tersebut tidak ditemukan")
+            member_row = db_one(
+                "SELECT 1 FROM org_members WHERE user_id = %s::uuid AND org_id = %s::uuid",
+                (str(user_row["id"]), session["org_id"]),
+            )
+            if not member_row:
+                raise HTTPException(400, "Akun tersebut bukan anggota organisasi ini")
+            sets.append("user_id = %s::uuid")
+            params.append(str(user_row["id"]))
     if not sets:
         return {"updated_entries": 0}
     params.extend([name, session["org_id"]])

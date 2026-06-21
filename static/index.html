@@ -812,6 +812,12 @@ $("#faceLoginCapture").addEventListener("click", async () => {
       return;
     }
 
+    if (!d.dashboard_login) {
+      msg.className = "msg err";
+      msg.textContent = `Wajah "${d.person?.name || ""}" dikenali, tapi belum ditautkan ke akun login. Hubungi admin untuk menautkan.`;
+      return;
+    }
+
     localStorage.setItem("zface_token", d.access_token);
     $("#faceLoginModal").classList.remove("open");
     if (faceLoginStream) { faceLoginStream.getTracks().forEach(t => t.stop()); faceLoginStream = null; }
@@ -1928,8 +1934,9 @@ function renderPeople(term) {
     const enc = encodeURIComponent(p.name);
     const badge = p.title ? `<span class="person-title-badge">${p.title}</span>` : "";
     const exBadge = p.greet_exempt ? `<span class="person-title-badge" style="color:var(--nomatch)">tidak disapa</span>` : "";
+    const linkBadge = p.linked_email ? `<span class="person-title-badge" style="color:var(--accent)">🔑 ${p.linked_email}</span>` : "";
     const actions = canManage() ? `<div style="display:flex;gap:6px">
-        <button class="btn-edit" data-action="edit" data-name="${enc}" data-title="${p.title || ""}" data-exempt="${p.greet_exempt ? "1" : ""}">Edit</button>
+        <button class="btn-edit" data-action="edit" data-name="${enc}" data-title="${p.title || ""}" data-exempt="${p.greet_exempt ? "1" : ""}" data-linked-email="${p.linked_email || ""}">Edit</button>
         <button data-action="hapus" data-name="${enc}">Hapus semua</button>
       </div>` : "";
     // Foto-foto
@@ -1947,7 +1954,7 @@ function renderPeople(term) {
     return `<div class="person-group" data-name="${enc}">
       <div class="person-row">
         <div class="person-display">
-          <div>${badge}${exBadge}<b>${p.name}</b></div>
+          <div>${badge}${exBadge}${linkBadge}<b>${p.name}</b></div>
           <div class="meta">${p.photos} foto · klik untuk lihat</div>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center" class="person-actions">
@@ -1983,7 +1990,7 @@ function renderPeople(term) {
         if (!confirm(`Hapus semua data wajah "${name}"?`)) return;
         apiFetch("/api/people/" + b.dataset.name, { method: "DELETE" }).then(loadPeople).catch(() => {});
       } else if (b.dataset.action === "edit") {
-        openEditPerson(b.closest(".person-row"), name, b.dataset.title, b.dataset.exempt === "1");
+        openEditPerson(b.closest(".person-row"), name, b.dataset.title, b.dataset.exempt === "1", b.dataset.linkedEmail);
       } else if (b.classList.contains("btn-notes")) {
         openNotesModal(name);
       } else if (b.classList.contains("btn-del-photo")) {
@@ -1997,7 +2004,7 @@ function renderPeople(term) {
 
 $("#peopleSearch").addEventListener("input", (e) => renderPeople(e.target.value));
 
-function openEditPerson(row, name, currentTitle, currentExempt) {
+function openEditPerson(row, name, currentTitle, currentExempt, currentLinkedEmail) {
   const display = row.querySelector(".person-display");
   const actions = row.querySelector(".person-actions");
   display.innerHTML = `<div class="person-edit">
@@ -2010,6 +2017,8 @@ function openEditPerson(row, name, currentTitle, currentExempt) {
     <label style="display:flex;align-items:center;gap:6px;margin:0;font-family:var(--mono);font-size:0.72rem;color:var(--muted);cursor:pointer">
       <input type="checkbox" class="edit-exempt" ${currentExempt ? "checked" : ""} style="width:auto;margin:0"> tidak disapa di mode TAMU
     </label>
+    <label style="display:block;font-family:var(--mono);font-size:0.7rem;color:var(--muted);margin-top:10px">AKUN LOGIN (untuk Login dengan Wajah)</label>
+    <input type="text" class="edit-link-email" placeholder="email@perusahaan.com (kosongkan untuk lepas tautan)" value="${currentLinkedEmail || ""}">
   </div>`;
   actions.innerHTML = `
     <button class="btn-save" data-action="save">Simpan</button>
@@ -2020,13 +2029,14 @@ function openEditPerson(row, name, currentTitle, currentExempt) {
       const newName = display.querySelector(".edit-name").value.trim();
       const newTitle = display.querySelector(".edit-title").value;
       const newExempt = display.querySelector(".edit-exempt").checked;
+      const linkEmail = display.querySelector(".edit-link-email").value.trim();
       if (!newName) { alert("Nama tidak boleh kosong"); return; }
       b.disabled = true; b.textContent = "…";
       try {
         const res = await apiFetch("/api/people/" + encodeURIComponent(name), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ new_name: newName, title: newTitle, greet_exempt: newExempt }),
+          body: JSON.stringify({ new_name: newName, title: newTitle, greet_exempt: newExempt, link_email: linkEmail }),
         });
         if (!res.ok) { const e = await res.json(); alert(e.detail || "Gagal menyimpan"); return; }
         loadPeople();
