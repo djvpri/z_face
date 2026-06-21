@@ -164,6 +164,7 @@ def db_one(sql: str, params=()):
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, params)
             row = cur.fetchone()
+            conn.commit()
             return dict(row) if row else None
     except Exception:
         conn.rollback()
