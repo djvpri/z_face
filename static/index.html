@@ -767,8 +767,8 @@ $("#faceLoginBtn").addEventListener("click", async () => {
 
 $("#faceLoginCameraSelect").addEventListener("change", async () => {
   try {
+    if (faceLoginStream) { faceLoginStream.getTracks().forEach((t) => t.stop()); faceLoginStream = null; }
     const stream = await getCameraStream($("#faceLoginCameraSelect").value);
-    if (faceLoginStream) faceLoginStream.getTracks().forEach((t) => t.stop());
     faceLoginStream = stream;
     $("#faceLoginVideo").srcObject = stream;
   } catch (err) {
@@ -1499,8 +1499,8 @@ function openCamera(onCapture) {
 
 $("#cameraSelect").addEventListener("change", async () => {
   try {
+    if (cameraStream) { cameraStream.getTracks().forEach((t) => t.stop()); cameraStream = null; }
     const stream = await getCameraStream($("#cameraSelect").value);
-    if (cameraStream) cameraStream.getTracks().forEach((t) => t.stop());
     cameraStream = stream;
     $("#cameraVideo").srcObject = stream;
   } catch (err) {
@@ -1595,8 +1595,8 @@ async function startRealtime() {
 
 $("#rtCameraSelect").addEventListener("change", async () => {
   try {
+    if (rtStream) { rtStream.getTracks().forEach((t) => t.stop()); rtStream = null; }
     const stream = await getCameraStream($("#rtCameraSelect").value);
-    if (rtStream) rtStream.getTracks().forEach((t) => t.stop());
     rtStream = stream;
     $("#rtVideo").srcObject = stream;
   } catch (err) {
@@ -1756,8 +1756,8 @@ async function startGuest() {
 
 $("#guestCameraSelect").addEventListener("change", async () => {
   try {
+    if (guestStream) { guestStream.getTracks().forEach((t) => t.stop()); guestStream = null; }
     const stream = await getCameraStream($("#guestCameraSelect").value);
-    if (guestStream) guestStream.getTracks().forEach((t) => t.stop());
     guestStream = stream;
     $("#guestVideo").srcObject = stream;
   } catch (err) {
