@@ -97,11 +97,6 @@ export default function LoginPage() {
 
   // Face login
   const handleFaceLogin = async () => {
-    if (!email) {
-      setError('Masukkan email terlebih dahulu')
-      return
-    }
-    
     setLoading(true)
     setError('')
     setFaceStatus('Mengaktifkan kamera...')
@@ -123,23 +118,23 @@ export default function LoginPage() {
       if (embedding) {
         setFaceStatus('Memverifikasi wajah...')
         
-        // Send to API
+        // Send to API (no email needed — face is the ID)
         const res = await fetch('/api/face/verify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, embedding, threshold: 0.6 }),
+          body: JSON.stringify({ embedding, threshold: 0.5 }),
         })
         
         const data = await res.json()
         
         if (data.match) {
-          setFaceStatus(`Wajah terverifikasi! Confidence: ${(data.confidence * 100).toFixed(1)}%`)
+          setFaceStatus(`Halo, ${data.name}! Confidence: ${(data.confidence * 100).toFixed(1)}%`)
           stopCamera()
           
-          // Sign in with credentials
+          // Sign in with matched user
           const signInResult = await signIn('credentials', {
-            email,
-            password: data.email, // Use email as password placeholder for face login
+            email: data.email,
+            password: `face:${data.name}`,
             redirect: false,
           })
           
@@ -280,18 +275,6 @@ export default function LoginPage() {
             </form>
           ) : (
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1.5">Email</label>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                  placeholder="admin@zone.id"
-                />
-              </div>
-
               {/* Camera Preview */}
               <div className="relative aspect-video bg-slate-800 rounded-lg overflow-hidden">
                 <video
