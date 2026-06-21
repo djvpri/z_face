@@ -979,8 +979,37 @@ async def cross_app_action(request: Request, authorization: str = Header(default
         tenant_id = data.get("tenantId")
         if not tenant_id:
             raise HTTPException(400, "tenantId required")
-        db_one("DELETE FROM organizations WHERE id = %s::uuid", (tenant_id,))
+        db_run("DELETE FROM organizations WHERE id = %s::uuid", (tenant_id,))
         return {"success": True}
+
+    elif action == "linkFaceUser":
+        # Tautkan wajah (per nama) ke akun login lokal ZFace via email.
+        # Dipanggil dari panel admin Z One.
+        face_name = (data.get("name") or "").strip()
+        link_email = (data.get("email") or "").strip()
+        if not face_name:
+            raise HTTPException(400, "name required")
+        if not link_email:
+            # Lepas tautan
+            rows = db_run("UPDATE faces SET user_id = NULL WHERE name = %s RETURNING id", (face_name,))
+            return {"success": True, "linked": False, "updated_entries": len(rows)}
+
+        user_row = db_one("SELECT id FROM users WHERE lower(email) = %s", (link_email.lower(),))
+        if not user_row:
+            raise HTTPException(404, f"Akun dengan email {link_email} tidak ditemukan di ZFace")
+        member_row = db_one(
+            "SELECT 1 FROM org_members WHERE user_id = %s::uuid LIMIT 1",
+            (str(user_row["id"]),),
+        )
+        if not member_row:
+            raise HTTPException(400, f"Akun {link_email} belum jadi anggota organisasi manapun di ZFace")
+        rows = db_run(
+            "UPDATE faces SET user_id = %s::uuid WHERE name = %s RETURNING id",
+            (str(user_row["id"]), face_name),
+        )
+        if not rows:
+            raise HTTPException(404, f'Wajah dengan nama "{face_name}" tidak ditemukan')
+        return {"success": True, "linked": True, "updated_entries": len(rows)}
 
     return {"error": "Unknown action"}
 
