@@ -802,6 +802,7 @@ $("#faceLoginCapture").addEventListener("click", async () => {
 
     const fd = new FormData();
     fd.append("file", new File([blob], "login.jpg", { type: "image/jpeg" }));
+    fd.append("for_dashboard", "true");
 
     const r = await fetch("/api/auth/face-login", { method: "POST", body: fd });
     const d = await r.json();

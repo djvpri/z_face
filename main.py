@@ -461,11 +461,17 @@ async def face_login(
     file: UploadFile = File(...),
     org_id: str = Form(default=""),
     threshold: float = Form(0.45),
+    for_dashboard: bool = Form(default=False),
 ):
     """
     Public endpoint for face login across apps.
     Takes a photo, identifies the face, returns a short-lived JWT token.
     If org_id is empty, searches across ALL organizations.
+
+    `for_dashboard=true` is used ONLY by ZFace's own login screen, to get a
+    full session token (if the face is linked to a local ZFace account).
+    Other apps (Z One, etc.) must NOT send this flag — they rely on the
+    standard short-lived cross-app token shape below, unchanged.
     """
     if not FACE_LOGIN_SECRET:
         raise HTTPException(503, "Face login not configured")
@@ -507,15 +513,18 @@ async def face_login(
     if not org:
         raise HTTPException(404, "Organization not found")
 
-    # Cek apakah wajah ini sudah ditautkan ke akun login (users.id)
-    face_row = db_one("SELECT user_id FROM faces WHERE id = %s::uuid", (best_match["id"],))
-    linked_user_id = str(face_row["user_id"]) if face_row and face_row.get("user_id") else None
+    # Cek apakah wajah ini sudah ditautkan ke akun login (users.id) —
+    # hanya relevan untuk mode dashboard ZFace sendiri.
+    linked_user_id = None
+    if for_dashboard:
+        face_row = db_one("SELECT user_id FROM faces WHERE id = %s::uuid", (best_match["id"],))
+        linked_user_id = str(face_row["user_id"]) if face_row and face_row.get("user_id") else None
 
     log_audit("face-login", "face_login", f"{person_name} ({similarity:.2%})", matched_org_id)
 
-    if linked_user_id:
+    if for_dashboard and linked_user_id:
         # Wajah ditautkan ke akun login -> terbitkan token sesi PENUH (sama seperti login email/password)
-        # supaya bisa langsung dipakai masuk dashboard (bukan cuma token cross-app berumur pendek).
+        # supaya bisa langsung dipakai masuk dashboard ZFace sendiri.
         user_row = db_one("SELECT email FROM users WHERE id = %s::uuid", (linked_user_id,))
         token = jwt.encode(
             {
@@ -535,9 +544,13 @@ async def face_login(
             "org": {"id": matched_org_id, "name": org.get("name", "")},
         }
 
-    # Belum ditautkan ke akun login -> tetap kasih token cross-app berumur pendek
-    # (dipakai aplikasi lain untuk verifikasi via /api/auth/verify-face-token),
-    # tapi TIDAK bisa dipakai login ke dashboard ini.
+    if for_dashboard and not linked_user_id:
+        # Dipanggil dari dashboard ZFace sendiri tapi wajah belum ditautkan -> kasih pesan jelas,
+        # JANGAN balikin token cross-app supaya frontend tidak salah kira berhasil login.
+        raise HTTPException(403, f'Wajah "{person_name}" dikenali, tapi belum ditautkan ke akun login. Hubungi admin.')
+
+    # Mode standar (dipakai Z One & app lain) -> token cross-app berumur pendek, TIDAK BERUBAH
+    # dari perilaku sebelumnya, supaya tidak merusak integrasi SSO yang sudah berjalan.
     token_payload = {
         "sub": str(best_match["id"]),
         "person_name": person_name,
