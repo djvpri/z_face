@@ -607,6 +607,70 @@ def verify_face_token(token: str = Form(...)):
         "expires_at": payload.get("exp"),
     }
 
+
+# ----- SSO dari Z One (hub ekosistem) -----
+
+class SsoVerifyRequest(BaseModel):
+    token: str
+
+
+@app.post("/api/auth/sso-verify")
+def sso_verify(body: SsoVerifyRequest):
+    """
+    Terima token SSO singkat dari Z One (ditandatangani CROSS_APP_SECRET),
+    cocokkan ke akun lokal ZFace lewat email, lalu terbitkan sesi ZFace biasa.
+    Z One sudah memvalidasi hak akses (membership) sebelum mengirim token ini,
+    jadi di sini cukup verifikasi tanda tangan + cari akun lokal.
+    """
+    if not JWT_SECRET:
+        raise HTTPException(503, "Auth belum dikonfigurasi (JWT_SECRET)")
+    try:
+        payload = jwt.decode(body.token, CROSS_APP_SECRET, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(401, "Token SSO sudah kedaluwarsa, coba buka lagi dari Z One")
+    except jwt.InvalidTokenError:
+        raise HTTPException(401, "Token SSO tidak valid")
+
+    if payload.get("app") != "zface":
+        raise HTTPException(400, "Token SSO ini bukan untuk ZFace")
+
+    email = (payload.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(400, "Token SSO tidak berisi email")
+
+    user_row = db_one("SELECT id, email FROM users WHERE lower(email) = %s", (email,))
+    if not user_row:
+        raise HTTPException(
+            404,
+            f"Akun {email} belum terdaftar sebagai member organisasi ZFace manapun. Hubungi admin ZFace.",
+        )
+
+    member_row = db_one(
+        "SELECT 1 FROM org_members WHERE user_id = %s::uuid LIMIT 1",
+        (str(user_row["id"]),),
+    )
+    if not member_row:
+        raise HTTPException(403, f"Akun {email} tidak terdaftar di organisasi manapun di ZFace. Hubungi admin.")
+
+    token = jwt.encode(
+        {
+            "sub": str(user_row["id"]),
+            "email": user_row["email"],
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(days=30),
+        },
+        JWT_SECRET,
+        algorithm="HS256",
+    )
+    log_audit(email, "sso_login", "via Z One", None)
+    return {"access_token": token, "user": {"id": str(user_row["id"]), "email": user_row["email"]}}
+
+
+@app.get("/sso")
+def sso_landing():
+    """Halaman perantara: terima ?token=... dari Z One, simpan sesi, redirect ke dashboard."""
+    return FileResponse("static/sso.html")
+
+
 @app.post("/api/register-public")
 async def register_face_public(
     name: str = Form(...),
