@@ -321,7 +321,20 @@ export default function LoginPage() {
 
               <div className="flex gap-2">
                 <button
-                  onClick={() => { setCameraFacing(cameraFacing === 'user' ? 'environment' : 'user'); if (cameraActive) { streamRef.current?.getTracks().forEach(t => t.stop()); setCameraActive(false); } }}
+                  onClick={async () => { 
+                    const newFacing = cameraFacing === 'user' ? 'environment' : 'user'
+                    setCameraFacing(newFacing)
+                    if (cameraActive) { 
+                      streamRef.current?.getTracks().forEach(t => t.stop())
+                      try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: newFacing } })
+                        if (videoRef.current) {
+                          videoRef.current.srcObject = stream
+                          streamRef.current = stream
+                        }
+                      } catch {}
+                    }
+                  }}
                   className="bg-slate-700 hover:bg-slate-600 text-white rounded-lg px-3 py-2.5 transition-colors text-sm"
                   title={cameraFacing === 'user' ? 'Ganti kamera belakang' : 'Ganti kamera depan'}
                 >
