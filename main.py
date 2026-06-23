@@ -890,7 +890,8 @@ def _cross_app_data():
     for r in rows:
         name = r["name"]
         g = grouped.setdefault(name, {
-            "id": str(r["id"]),  # UUID wajah pertama dari grup (dipakai sebagai faceId di Z One)
+            "id": str(r["id"]),  # UUID wajah pertama dari grup
+            "all_ids": [],       # SEMUA UUID dari grup ini (untuk matching di Z One)
             "name": name,
             "org_id": str(r["org_id"]) if r.get("org_id") else "",
             "faces": 0,
@@ -899,6 +900,7 @@ def _cross_app_data():
             "linked_email": r.get("linked_email"),
         })
         g["faces"] += 1
+        g["all_ids"].append(str(r["id"]))
         if r.get("linked_email"):
             g["linked_email"] = r["linked_email"]
 
