@@ -356,17 +356,12 @@
 <div id="loginOverlay">
   <div class="login-box">
     <h2>Z<span style="color:var(--accent)">Face</span></h2>
-    <p class="sub">Silakan masuk untuk melanjutkan</p>
-    <label for="loginEmail">EMAIL</label>
-    <input type="email" id="loginEmail" placeholder="email@perusahaan.com" autocomplete="username">
-    <label for="loginPassword">PASSWORD</label>
-    <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
-    <button class="btn" id="loginBtn" type="button">MASUK</button>
-    <div style="text-align:center;margin:16px 0;position:relative">
-      <div style="border-top:1px solid var(--line)"></div>
-      <span style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);background:var(--surface);padding:0 10px;font-family:var(--mono);font-size:0.7rem;color:var(--muted)">ATAU</span>
+    <p class="sub">Mengarahkan ke Z One...</p>
+    <div style="display:flex;justify-content:center;margin:24px 0">
+      <div style="width:32px;height:32px;border:3px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></div>
     </div>
-    <button class="btn secondary" id="faceLoginBtn" type="button" style="margin-top:0">📷 LOGIN DENGAN WAJAH</button>
+    <p class="sub" style="font-size:0.75rem">Login sekarang melalui <strong>Z One</strong></p>
+    <button class="btn" id="loginBtn" type="button" style="margin-top:16px">BUKA Z ONE</button>
     <div class="msg" id="loginMsg"></div>
   </div>
 </div>
@@ -713,34 +708,22 @@ function showLock(msg) {
   $("#lockOverlay").classList.remove("hidden");
 }
 
-$("#loginBtn").addEventListener("click", async () => {
-  const btn = $("#loginBtn");
-  const msg = $("#loginMsg");
-  const email = $("#loginEmail").value.trim();
-  const password = $("#loginPassword").value;
-  msg.className = "msg";
-  if (!email || !password) {
-    msg.className = "msg err"; msg.textContent = "Email dan password wajib diisi"; return;
-  }
-  btn.disabled = true; btn.textContent = "MASUK…";
-  try {
-    const r = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    const d = await r.json();
-    if (!r.ok) { msg.className = "msg err"; msg.textContent = d.detail || "Login gagal"; return; }
-    localStorage.setItem("zface_token", d.access_token);
-    hideLogin();
-    initAuth();
-  } catch { msg.className = "msg err"; msg.textContent = "Tidak dapat terhubung ke server"; }
-  finally { btn.disabled = false; btn.textContent = "MASUK"; }
-});
+// Login sekarang lewat Z One SSO
+function doZOneLogin() {
+  const returnUrl = encodeURIComponent(window.location.origin + '/sso');
+  window.location.href = 'https://zone.zomet.my.id/login?callbackUrl=' + returnUrl;
+}
 
-$("#loginPassword").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") $("#loginBtn").click();
-});
+$("#loginBtn").addEventListener("click", doZOneLogin);
+
+// Auto-redirect ke Z One saat overlay login muncul (setelah 800ms biar user sempat lihat)
+const _origShowLogin = showLogin;
+showLogin = function() {
+  _origShowLogin && _origShowLogin();
+  setTimeout(doZOneLogin, 800);
+};
+
+// (listener loginPassword dihapus - input tidak ada lagi di form SSO)
 
 // ---------- Face Login ----------
 let faceLoginStream = null;
