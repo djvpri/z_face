@@ -716,13 +716,6 @@ function doZOneLogin() {
 
 $("#loginBtn").addEventListener("click", doZOneLogin);
 
-// Auto-redirect ke Z One saat overlay login muncul (setelah 800ms biar user sempat lihat)
-const _origShowLogin = showLogin;
-showLogin = function() {
-  _origShowLogin && _origShowLogin();
-  setTimeout(doZOneLogin, 800);
-};
-
 // (listener loginPassword dihapus - input tidak ada lagi di form SSO)
 
 // ---------- Face Login ----------
