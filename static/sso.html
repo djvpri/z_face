@@ -60,7 +60,8 @@
     }
 
     localStorage.setItem("zface_token", d.access_token);
-    location.replace("/app");
+    // Pakai absolute URL supaya redirect ke ZFace sendiri, bukan ke domain yang sedang aktif
+    location.replace("https://zface.zomet.my.id/app");
   } catch (err) {
     spinnerEl.style.display = "none";
     msgEl.className = "err";
