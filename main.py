@@ -489,16 +489,23 @@ async def face_login(
     
     # Match against registered faces
     if org_id:
-        # Search in specific org
         rows = db_all(
-            "SELECT * FROM match_faces(%s::vector, %s, 1, %s::uuid)",
-            (vec(embedding), threshold, org_id),
+            "SELECT f.id, f.name, f.org_id, "
+            "1 - (f.embedding <=> %s::vector) AS similarity "
+            "FROM faces f "
+            "WHERE f.org_id = %s::uuid "
+            "AND 1 - (f.embedding <=> %s::vector) > %s "
+            "ORDER BY f.embedding <=> %s::vector LIMIT 1",
+            (vec(embedding), org_id, vec(embedding), threshold, vec(embedding)),
         )
     else:
-        # Search across ALL organizations
         rows = db_all(
-            "SELECT * FROM match_faces_all_orgs(%s::vector, %s, 1)",
-            (vec(embedding), threshold),
+            "SELECT f.id, f.name, f.org_id, "
+            "1 - (f.embedding <=> %s::vector) AS similarity "
+            "FROM faces f "
+            "WHERE 1 - (f.embedding <=> %s::vector) > %s "
+            "ORDER BY f.embedding <=> %s::vector LIMIT 1",
+            (vec(embedding), vec(embedding), threshold, vec(embedding)),
         )
     
     if not rows:
