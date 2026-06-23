@@ -663,7 +663,15 @@ async function initAuth() {
       showLock(e.detail || "Langganan organisasi sudah berakhir.");
       return;
     }
-    if (!r.ok) { showLogin(); return; }
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      console.error("initAuth failed:", r.status, e);
+      // Tampilkan error di overlay login biar bisa debug
+      showLogin();
+      const msgEl = document.getElementById("loginMsg");
+      if (msgEl) { msgEl.className = "msg err"; msgEl.textContent = `Error ${r.status}: ${e.detail || e.error || "Sesi tidak valid"}`; }
+      return;
+    }
     const me = await r.json();
     currentRole = me.role || "member";
     currentFeatures = me.features || {};
