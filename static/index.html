@@ -621,6 +621,8 @@
 </div>
 
 <script>
+// $ adalah querySelector yang safe — kalau elemen tidak ada, return null-safe proxy
+// supaya addEventListener dll tidak crash saat elemen tidak ada di DOM
 const $ = (s) => document.querySelector(s);
 
 // ---------- Auth ----------
@@ -722,14 +724,14 @@ function doZOneLogin() {
   window.location.href = 'https://zone.zomet.my.id/login?callbackUrl=' + returnUrl;
 }
 
-$("#loginBtn").addEventListener("click", doZOneLogin);
+$("##loginBtn")?.addEventListener("click", doZOneLogin);
 
 // (listener loginPassword dihapus - input tidak ada lagi di form SSO)
 
 // ---------- Face Login ----------
 let faceLoginStream = null;
 
-$("#faceLoginBtn").addEventListener("click", async () => {
+if ($("#faceLoginBtn")) $("##faceLoginBtn")?.addEventListener("click", async () => {
   const msg = $("#loginMsg");
   msg.className = "msg";
 
@@ -749,7 +751,7 @@ $("#faceLoginBtn").addEventListener("click", async () => {
   }
 });
 
-$("#faceLoginCameraSelect").addEventListener("change", async () => {
+$("##faceLoginCameraSelect")?.addEventListener("change", async () => {
   try {
     await stopStreamAndWait(faceLoginStream);
     faceLoginStream = null;
@@ -761,13 +763,13 @@ $("#faceLoginCameraSelect").addEventListener("change", async () => {
   }
 });
 
-$("#faceLoginClose").addEventListener("click", () => {
+$("##faceLoginClose")?.addEventListener("click", () => {
   $("#faceLoginModal").classList.remove("open");
   if (faceLoginStream) { faceLoginStream.getTracks().forEach(t => t.stop()); faceLoginStream = null; }
   $("#faceLoginCameraSelect").hidden = true;
 });
 
-$("#faceLoginCapture").addEventListener("click", async () => {
+$("##faceLoginCapture")?.addEventListener("click", async () => {
   const btn = $("#faceLoginCapture");
   const msg = $("#faceLoginMsg");
   const video = $("#faceLoginVideo");
@@ -814,17 +816,17 @@ $("#faceLoginCapture").addEventListener("click", async () => {
   }
 });
 
-$("#logoutBtn").addEventListener("click", logout);
-$("#lockLogoutBtn").addEventListener("click", logout);
+$("##logoutBtn")?.addEventListener("click", logout);
+$("##lockLogoutBtn")?.addEventListener("click", logout);
 
 // ---------- Ganti password ----------
-$("#pwBtn").addEventListener("click", () => {
+$("##pwBtn")?.addEventListener("click", () => {
   $("#pwOld").value = ""; $("#pwNew").value = "";
   $("#pwMsg").className = "msg";
   $("#pwOverlay").classList.remove("hidden");
 });
-$("#pwCancelBtn").addEventListener("click", () => $("#pwOverlay").classList.add("hidden"));
-$("#pwSaveBtn").addEventListener("click", async () => {
+$("##pwCancelBtn")?.addEventListener("click", () => $("#pwOverlay").classList.add("hidden"));
+$("##pwSaveBtn")?.addEventListener("click", async () => {
   const oldp = $("#pwOld").value, newp = $("#pwNew").value;
   const msg = $("#pwMsg");
   if (!oldp || !newp) { msg.className = "msg err"; msg.textContent = "Isi kedua kolom"; return; }
@@ -888,7 +890,7 @@ async function loadGreetingSettings() {
 }
 loadGreetingSettings();
 
-$("#greetingSaveBtn").addEventListener("click", async () => {
+$("##greetingSaveBtn")?.addEventListener("click", async () => {
   const btn = $("#greetingSaveBtn");
   btn.disabled = true; btn.textContent = "MENYIMPAN…";
   try {
@@ -968,11 +970,11 @@ async function handleIdFile(f) {
 }
 
 setupDrop($("#idDrop"), $("#idFile"), handleIdFile);
-$("#idCameraBtn").addEventListener("click", () => openCamera(handleIdFile));
+$("##idCameraBtn")?.addEventListener("click", () => openCamera(handleIdFile));
 
-$("#threshold").addEventListener("input", (e) => { $("#thVal").textContent = e.target.value; });
+$("##threshold")?.addEventListener("input", (e) => { $("#thVal").textContent = e.target.value; });
 
-$("#idBtn").addEventListener("click", async () => {
+$("##idBtn")?.addEventListener("click", async () => {
   if (!idFileObj) return;
   const btn = $("#idBtn");
   btn.disabled = true; btn.textContent = "MEMERIKSA…";
@@ -1026,10 +1028,10 @@ async function handleSigFile(f) {
 }
 
 setupDrop($("#sigDrop"), $("#sigFile"), handleSigFile);
-$("#sigCameraBtn").addEventListener("click", () => openCamera(handleSigFile));
-$("#sigThreshold").addEventListener("input", (e) => { $("#sigThVal").textContent = e.target.value; });
+$("##sigCameraBtn")?.addEventListener("click", () => openCamera(handleSigFile));
+$("##sigThreshold")?.addEventListener("input", (e) => { $("#sigThVal").textContent = e.target.value; });
 
-$("#sigBtn").addEventListener("click", async () => {
+$("##sigBtn")?.addEventListener("click", async () => {
   if (!sigFileObj) return;
   const btn = $("#sigBtn");
   btn.disabled = true; btn.textContent = "MEMERIKSA…";
@@ -1082,7 +1084,7 @@ function renderSigResults(d) {
       </div>
       <div class="quick-reg-msg" id="sigRegMsg"></div>
     </div>`;
-    $("#sigRegBtn").addEventListener("click", registerSignatureFromResult);
+    $("##sigRegBtn")?.addEventListener("click", registerSignatureFromResult);
   }
 }
 
@@ -1331,7 +1333,7 @@ async function registerFaceFromLog(btn) {
   }
 }
 
-$("#logsRefreshBtn").addEventListener("click", loadLogs);
+$("##logsRefreshBtn")?.addEventListener("click", loadLogs);
 
 let logsAutoRefresh = null;
 
@@ -1392,9 +1394,9 @@ async function handleRegFile(f) {
 }
 
 setupDrop($("#regDrop"), $("#regFile"), handleRegFile);
-$("#regCameraBtn").addEventListener("click", () => openCamera(handleRegFile));
+$("##regCameraBtn")?.addEventListener("click", () => openCamera(handleRegFile));
 
-$("#regBtn").addEventListener("click", async () => {
+$("##regBtn")?.addEventListener("click", async () => {
   const name = $("#regName").value.trim();
   if (!name) { showMsg($("#regMsg"), "Isi nama dulu", "err"); return; }
   if (!regFileObj) return;
@@ -1502,7 +1504,7 @@ function openCamera(onCapture) {
     });
 }
 
-$("#cameraSelect").addEventListener("change", async () => {
+$("##cameraSelect")?.addEventListener("change", async () => {
   try {
     await stopStreamAndWait(cameraStream);
     cameraStream = null;
@@ -1547,7 +1549,7 @@ function stampTimeAndLocation(ctx, canvas) {
   ctx.fillText(label, padding, canvas.height - barHeight / 2);
 }
 
-$("#captureBtn").addEventListener("click", () => {
+$("##captureBtn")?.addEventListener("click", () => {
   const video = $("#cameraVideo");
   const canvas = $("#cameraCanvas");
   canvas.width = video.videoWidth;
@@ -1563,7 +1565,7 @@ $("#captureBtn").addEventListener("click", () => {
   }, "image/jpeg", 0.92);
 });
 
-$("#closeCameraBtn").addEventListener("click", closeCamera);
+$("##closeCameraBtn")?.addEventListener("click", closeCamera);
 
 // ---------- Realtime ----------
 let rtStream = null;
@@ -1571,7 +1573,7 @@ let rtInterval = null;
 let rtBusy = false;
 let rtImageMeta = null;
 
-$("#rtThreshold").addEventListener("input", (e) => { $("#rtThVal").textContent = e.target.value; });
+$("##rtThreshold")?.addEventListener("input", (e) => { $("#rtThVal").textContent = e.target.value; });
 
 async function startRealtime() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -1599,7 +1601,7 @@ async function startRealtime() {
   rtInterval = setInterval(captureAndIdentify, 1500);
 }
 
-$("#rtCameraSelect").addEventListener("change", async () => {
+$("##rtCameraSelect")?.addEventListener("change", async () => {
   try {
     await stopStreamAndWait(rtStream);
     rtStream = null;
@@ -1708,8 +1710,8 @@ function renderRtResults(faces) {
   }).join("");
 }
 
-$("#rtStartBtn").addEventListener("click", startRealtime);
-$("#rtStopBtn").addEventListener("click", stopRealtime);
+$("##rtStartBtn")?.addEventListener("click", startRealtime);
+$("##rtStopBtn")?.addEventListener("click", stopRealtime);
 
 // ---------- Mode Tamu ----------
 let guestStream = null;
@@ -1761,7 +1763,7 @@ async function startGuest() {
   guestInterval = setInterval(captureGuest, 1500);
 }
 
-$("#guestCameraSelect").addEventListener("change", async () => {
+$("##guestCameraSelect")?.addEventListener("change", async () => {
   try {
     await stopStreamAndWait(guestStream);
     guestStream = null;
@@ -1773,7 +1775,7 @@ $("#guestCameraSelect").addEventListener("change", async () => {
   }
 });
 
-$("#guestThreshold").addEventListener("input", (e) => { $("#guestThVal").textContent = e.target.value; });
+$("##guestThreshold")?.addEventListener("input", (e) => { $("#guestThVal").textContent = e.target.value; });
 
 function stopGuest() {
   if (guestInterval) { clearInterval(guestInterval); guestInterval = null; }
@@ -1872,8 +1874,8 @@ function updateGuestGreeting(faces) {
   }
 }
 
-$("#guestStartBtn").addEventListener("click", startGuest);
-$("#guestStopBtn").addEventListener("click", stopGuest);
+$("##guestStartBtn")?.addEventListener("click", startGuest);
+$("##guestStopBtn")?.addEventListener("click", stopGuest);
 
 // ---------- Database ----------
 let peopleCache = {}; // name → {title, exempt}, untuk TAMU mode
@@ -1987,7 +1989,7 @@ function renderPeople(term) {
   });
 }
 
-$("#peopleSearch").addEventListener("input", (e) => renderPeople(e.target.value));
+$("##peopleSearch")?.addEventListener("input", (e) => renderPeople(e.target.value));
 
 function openEditPerson(row, name, currentTitle, currentExempt, currentLinkedEmail) {
   const display = row.querySelector(".person-display");
@@ -2052,13 +2054,13 @@ function closeNotesModal() {
   currentNoteFile = null;
 }
 
-$("#closeNotesBtn").addEventListener("click", closeNotesModal);
-$("#notesModal").addEventListener("click", (e) => {
+$("##closeNotesBtn")?.addEventListener("click", closeNotesModal);
+$("##notesModal")?.addEventListener("click", (e) => {
   if (e.target === $("#notesModal")) closeNotesModal();
 });
 
-$("#uploadFileBtn").addEventListener("click", () => $("#notesFile").click());
-$("#notesFile").addEventListener("change", () => {
+$("##uploadFileBtn")?.addEventListener("click", () => $("#notesFile").click());
+$("##notesFile")?.addEventListener("change", () => {
   const f = $("#notesFile").files[0];
   if (f) {
     currentNoteFile = f;
@@ -2107,7 +2109,7 @@ async function deleteNote(noteId) {
   } catch { alert("Gagal menghapus catatan."); }
 }
 
-$("#saveNoteBtn").addEventListener("click", async () => {
+$("##saveNoteBtn")?.addEventListener("click", async () => {
   const btn = $("#saveNoteBtn");
   const msg = $("#notesMsg");
   const text = $("#notesInput").value.trim();
