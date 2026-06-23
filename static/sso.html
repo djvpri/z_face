@@ -55,7 +55,13 @@
     if (!r.ok) {
       spinnerEl.style.display = "none";
       msgEl.className = "err";
-      msgEl.textContent = d.detail || "Gagal masuk lewat Z One.";
+      msgEl.textContent = d.detail || d.error || "Gagal masuk lewat Z One.";
+      const box = document.querySelector(".box");
+      const a = document.createElement("a");
+      a.href = "https://zone.zomet.my.id";
+      a.className = "btn";
+      a.textContent = "Kembali ke Z One";
+      box.appendChild(a);
       return;
     }
 
