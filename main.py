@@ -60,6 +60,7 @@ if DATABASE_URL:
         conn = db_pool.getconn()
         cur = conn.cursor()
         cur.execute("""
+            DROP FUNCTION IF EXISTS match_faces_all_orgs(vector, float, int);
             CREATE OR REPLACE FUNCTION match_faces_all_orgs(
                 query_embedding vector(512),
                 match_threshold float,
