@@ -1636,3 +1636,208 @@ def admin_page():
 @app.get("/sw.js")
 def service_worker():
     return FileResponse("static/sw.js", media_type="application/javascript")
+
+
+# ============================================================
+# CLIP Visual Search — Product Recognition
+# ============================================================
+
+_clip_model = None
+_clip_preprocess = None
+_clip_device = None
+
+def load_clip():
+    global _clip_model, _clip_preprocess, _clip_device
+    if _clip_model is not None:
+        return _clip_model, _clip_preprocess, _clip_device
+    print("Memuat model CLIP (ViT-B/32)...")
+    import torch
+    import clip as openai_clip
+    _clip_device = "cuda" if torch.cuda.is_available() else "cpu"
+    _clip_model, _clip_preprocess = openai_clip.load("ViT-B/32", device=_clip_device)
+    print(f"Model CLIP siap di {_clip_device}.")
+    return _clip_model, _clip_preprocess, _clip_device
+
+
+def clip_embedding_from_image(img_bytes: bytes) -> list[float]:
+    """Buat embedding 512-dim dari bytes gambar menggunakan CLIP."""
+    import torch
+    from PIL import Image
+    import io
+
+    model, preprocess, device = load_clip()
+    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    tensor = preprocess(img).unsqueeze(0).to(device)
+    with torch.no_grad():
+        emb = model.encode_image(tensor)
+        emb = emb / emb.norm(dim=-1, keepdim=True)  # normalize
+    return emb[0].cpu().tolist()
+
+
+def ensure_produk_table():
+    """Pastikan tabel produk_embedding ada."""
+    sql = """
+    CREATE TABLE IF NOT EXISTS produk_embedding (
+        id          SERIAL PRIMARY KEY,
+        tenant_id   TEXT NOT NULL,
+        app_slug    TEXT NOT NULL,
+        produk_id   TEXT NOT NULL,
+        nama        TEXT NOT NULL,
+        harga       NUMERIC DEFAULT 0,
+        embedding   vector(512),
+        foto_url    TEXT,
+        created_at  TIMESTAMPTZ DEFAULT now(),
+        UNIQUE(tenant_id, app_slug, produk_id)
+    );
+    CREATE INDEX IF NOT EXISTS produk_embedding_vec_idx
+        ON produk_embedding USING ivfflat (embedding vector_cosine_ops)
+        WITH (lists = 10);
+    """
+    db_run(sql)
+
+
+def require_cross_app(x_cross_app_secret: str = Header(default="")):
+    """Validasi request dari app ekosistem Zomet."""
+    if x_cross_app_secret != CROSS_APP_SECRET:
+        raise HTTPException(status_code=403, detail="Cross-app secret tidak valid")
+
+
+class ProdukEmbedRequest(BaseModel):
+    tenant_id: str
+    app_slug: str
+    produk_id: str
+    nama: str
+    harga: float = 0
+    foto_url: str | None = None
+
+
+@app.post("/api/produk/embed")
+async def produk_embed(
+    file: UploadFile = File(...),
+    tenant_id: str = Form(...),
+    app_slug: str = Form(...),
+    produk_id: str = Form(...),
+    nama: str = Form(...),
+    harga: float = Form(0),
+    foto_url: str = Form(""),
+    x_cross_app_secret: str = Header(default=""),
+):
+    """
+    Terima foto produk, buat CLIP embedding, simpan ke DB.
+    Dipanggil saat produk ditambah/diupdate di ZPOS/ZGold.
+    """
+    if x_cross_app_secret != CROSS_APP_SECRET:
+        raise HTTPException(status_code=403, detail="Cross-app secret tidak valid")
+
+    try:
+        img_bytes = await file.read()
+        embedding = clip_embedding_from_image(img_bytes)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Gagal proses gambar: {e}")
+
+    ensure_produk_table()
+
+    db_run("""
+        INSERT INTO produk_embedding (tenant_id, app_slug, produk_id, nama, harga, embedding, foto_url)
+        VALUES (%s, %s, %s, %s, %s, %s::vector, %s)
+        ON CONFLICT (tenant_id, app_slug, produk_id)
+        DO UPDATE SET nama=EXCLUDED.nama, harga=EXCLUDED.harga,
+                      embedding=EXCLUDED.embedding, foto_url=EXCLUDED.foto_url
+    """, (tenant_id, app_slug, produk_id, nama, harga, str(embedding), foto_url or None))
+
+    return {"ok": True, "produk_id": produk_id, "nama": nama}
+
+
+@app.post("/api/produk/cari")
+async def produk_cari(
+    file: UploadFile = File(...),
+    tenant_id: str = Form(...),
+    app_slug: str = Form(...),
+    top_k: int = Form(3),
+    x_cross_app_secret: str = Header(default=""),
+):
+    """
+    Terima foto dari kamera kasir, cari produk paling mirip.
+    Return top_k kandidat dengan confidence score.
+    """
+    if x_cross_app_secret != CROSS_APP_SECRET:
+        raise HTTPException(status_code=403, detail="Cross-app secret tidak valid")
+
+    try:
+        img_bytes = await file.read()
+        embedding = clip_embedding_from_image(img_bytes)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Gagal proses gambar: {e}")
+
+    ensure_produk_table()
+
+    rows = db_all("""
+        SELECT produk_id, nama, harga, foto_url,
+               1 - (embedding <=> %s::vector) AS similarity
+        FROM produk_embedding
+        WHERE tenant_id = %s AND app_slug = %s
+        ORDER BY embedding <=> %s::vector
+        LIMIT %s
+    """, (str(embedding), tenant_id, app_slug, str(embedding), top_k))
+
+    if not rows:
+        return {"hasil": [], "pesan": "Belum ada produk terdaftar untuk tenant ini"}
+
+    hasil = []
+    for r in rows:
+        sim = float(r["similarity"])
+        confidence = round(sim * 100, 1)
+        status = "tinggi" if confidence >= 80 else "sedang" if confidence >= 50 else "rendah"
+        hasil.append({
+            "produk_id": r["produk_id"],
+            "nama": r["nama"],
+            "harga": float(r["harga"]),
+            "foto_url": r["foto_url"],
+            "confidence": confidence,
+            "status": status,
+        })
+
+    return {"hasil": hasil}
+
+
+@app.delete("/api/produk/{produk_id}")
+def produk_hapus_embedding(
+    produk_id: str,
+    tenant_id: str,
+    app_slug: str,
+    x_cross_app_secret: str = Header(default=""),
+):
+    """Hapus embedding produk dari DB (saat produk dihapus di app asal)."""
+    if x_cross_app_secret != CROSS_APP_SECRET:
+        raise HTTPException(status_code=403, detail="Cross-app secret tidak valid")
+
+    ensure_produk_table()
+    db_run("""
+        DELETE FROM produk_embedding
+        WHERE tenant_id = %s AND app_slug = %s AND produk_id = %s
+    """, (tenant_id, app_slug, produk_id))
+
+    return {"ok": True, "produk_id": produk_id}
+
+
+@app.get("/api/produk")
+def produk_list(
+    tenant_id: str,
+    app_slug: str,
+    x_cross_app_secret: str = Header(default=""),
+):
+    """List semua produk yang sudah punya embedding untuk tenant ini."""
+    if x_cross_app_secret != CROSS_APP_SECRET:
+        raise HTTPException(status_code=403, detail="Cross-app secret tidak valid")
+
+    ensure_produk_table()
+    rows = db_all("""
+        SELECT produk_id, nama, harga, foto_url, created_at
+        FROM produk_embedding
+        WHERE tenant_id = %s AND app_slug = %s
+        ORDER BY nama
+    """, (tenant_id, app_slug))
+
+    return {"data": rows, "total": len(rows)}
+
+# ============================================================

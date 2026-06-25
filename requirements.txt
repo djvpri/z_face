@@ -9,3 +9,7 @@ insightface
 psycopg2-binary
 PyJWT
 bcrypt
+torch
+torchvision
+Pillow
+git+https://github.com/openai/CLIP.git
