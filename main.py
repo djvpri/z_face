@@ -126,15 +126,28 @@ print("Model siap.")
 
 app = FastAPI(title="ZFace API", version="1.0.0")
 
-if ALLOWED_ORIGINS:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=ALLOWED_ORIGINS,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-else:
-    print("CORS: lintas-domain dimatikan (hanya same-origin). Set ALLOWED_ORIGINS bila perlu.")
+ZOMET_ORIGINS = [
+    "https://zpos.zomet.my.id",
+    "https://zgold.zomet.my.id",
+    "https://zone.zomet.my.id",
+    "https://zresto.zomet.my.id",
+    "https://zbengkel.zomet.my.id",
+    "https://zmedics.zomet.my.id",
+    "https://z-absen.zomet.my.id",
+    "https://z-rooms.zomet.my.id",
+    "https://zface.zomet.my.id",
+]
+
+cors_origins = ALLOWED_ORIGINS if ALLOWED_ORIGINS else ZOMET_ORIGINS
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_origin_regex=r"https://.*\.zomet\.my\.id",
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=True,
+)
 
 
 # ----- Rate limiting login (anti brute-force) -----
