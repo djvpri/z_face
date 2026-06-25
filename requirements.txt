@@ -12,4 +12,4 @@ bcrypt
 torch
 torchvision
 Pillow
-git+https://github.com/openai/CLIP.git
+openai-clip
