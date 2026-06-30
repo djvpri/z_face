@@ -1040,6 +1040,75 @@ async def cross_app_action(request: Request, authorization: str = Header(default
             raise HTTPException(404, f'Wajah dengan nama "{face_name}" tidak ditemukan')
         return {"success": True, "linked": True, "updated_entries": len(rows)}
 
+    elif action == "create":
+        # Buat akun login ZFace + jadikan anggota organisasi (dipanggil dari
+        # ZOne /manage "Kelola Per-App"). SSO hanya mencocokkan email, jadi user
+        # harus eksis + punya org_members dulu. org = tenant di kontrak ZOne.
+        email = (data.get("email") or "").strip()
+        password = data.get("password") or ""
+        if not email or not password:
+            raise HTTPException(400, "email dan password wajib")
+        role = data.get("role")
+        if role not in ("owner", "admin", "member"):
+            role = "member"
+        org_id = data.get("tenantId")
+        if not org_id:
+            first = db_one("SELECT id FROM organizations ORDER BY created_at ASC LIMIT 1")
+            org_id = str(first["id"]) if first else None
+        if not org_id:
+            raise HTTPException(400, "Belum ada organisasi. Buat organisasi dulu.")
+        existing = db_one("SELECT id FROM users WHERE lower(email) = %s", (email.lower(),))
+        if existing:
+            user_id = str(existing["id"])
+        else:
+            pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+            rows = db_run("INSERT INTO users (email, password_hash) VALUES (%s, %s) RETURNING id", (email.lower(), pw_hash))
+            user_id = str(rows[0]["id"])
+        db_run(
+            "INSERT INTO org_members (org_id, user_id, role) VALUES (%s::uuid, %s::uuid, %s) "
+            "ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role",
+            (org_id, user_id, role),
+        )
+        log_audit("zone", "cross_app_create_user", f"{email} ({role})", org_id)
+        return {"success": True, "user": {"id": user_id, "email": email, "role": role}}
+
+    elif action in ("updateRole", "moveTenant", "resetPassword", "delete", "reactivate", "toggleActive"):
+        email = (body.get("email") or "").strip()
+        user = db_one("SELECT id FROM users WHERE lower(email) = %s", (email.lower(),))
+        if not user:
+            raise HTTPException(404, "User tidak ditemukan")
+        user_id = str(user["id"])
+
+        if action == "updateRole":
+            new_role = data.get("role")
+            if new_role not in ("owner", "admin", "member"):
+                raise HTTPException(400, "Role tidak valid")
+            db_run("UPDATE org_members SET role = %s WHERE user_id = %s::uuid", (new_role, user_id))
+            return {"success": True}
+
+        if action == "moveTenant":
+            org_id = data.get("tenantId")
+            if not org_id:
+                raise HTTPException(400, "tenantId wajib")
+            db_run("UPDATE org_members SET org_id = %s::uuid WHERE user_id = %s::uuid", (org_id, user_id))
+            return {"success": True}
+
+        if action == "resetPassword":
+            pw = data.get("password") or ""
+            if len(pw) < MIN_PASSWORD_LEN:
+                raise HTTPException(400, f"Password minimal {MIN_PASSWORD_LEN} karakter")
+            pw_hash = bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
+            db_run("UPDATE users SET password_hash = %s WHERE id = %s::uuid", (pw_hash, user_id))
+            return {"success": True}
+
+        # delete / toggleActive(off): ZFace tak punya kolom user.isActive — akses
+        # dikontrol lewat keanggotaan org, jadi "nonaktifkan" = cabut keanggotaan.
+        if action == "delete" or (action == "toggleActive" and data.get("is_active") is False):
+            db_run("DELETE FROM org_members WHERE user_id = %s::uuid", (user_id,))
+            return {"success": True, "deactivated": True}
+        # reactivate / aktifkan kembali butuh organisasi tujuan -> assign ulang.
+        return {"error": "Untuk mengaktifkan kembali, assign user ke organisasi via Tambah/Pindah."}
+
     return {"error": "Unknown action"}
 
 @app.get("/api/admin/audit")
