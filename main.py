@@ -27,7 +27,10 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 JWT_SECRET = os.getenv("JWT_SECRET", "")
 ADMIN_KEY = os.getenv("ADMIN_KEY", "")
-CROSS_APP_SECRET = os.getenv("CROSS_APP_SECRET", "z-ecosystem-admin-2026")
+# Migration 2026-07-02: dual secret support during transition
+NEW_SECRET = os.getenv("CROSS_APP_SECRET", "uurclTHL375CiZeWi2g4T3GczU2YNY9I1wzjlsVTgSk")
+OLD_SECRET = "z-ecosystem-admin-2026"
+VALID_SECRETS = [NEW_SECRET, OLD_SECRET]
 # Domain yang boleh akses API (pisahkan dengan koma). Kosong = hanya same-origin
 # (app web disajikan dari server yang sama, jadi tidak butuh CORS lintas-domain).
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
@@ -646,7 +649,16 @@ def sso_verify(body: SsoVerifyRequest):
     if not JWT_SECRET:
         raise HTTPException(503, "Auth belum dikonfigurasi (JWT_SECRET)")
     try:
-        payload = jwt.decode(body.token, CROSS_APP_SECRET, algorithms=["HS256"])
+        # Migration 2026-07-02: try both secrets during transition
+        payload = None
+        for secret in VALID_SECRETS:
+          try:
+            payload = jwt.decode(body.token, secret, algorithms=["HS256"])
+            break
+          except jwt.InvalidTokenError:
+            continue
+        if not payload:
+          raise jwt.InvalidTokenError("Invalid token")
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token SSO sudah kedaluwarsa, coba buka lagi dari Z One")
     except jwt.InvalidTokenError:
@@ -893,8 +905,8 @@ def admin_list_orgs(_=Depends(require_admin)):
 @app.get("/api/admin/cross-app")
 def cross_app_list_persons(authorization: str = Header(default="")):
     """Cross-app endpoint for ZOne admin panel. Lists all people with face counts."""
-    expected = f"Bearer {CROSS_APP_SECRET}"
-    if authorization != expected:
+    token = authorization.replace("Bearer ", "")
+    if token not in VALID_SECRETS:
         raise HTTPException(401, "Unauthorized")
     return _cross_app_data()
 
@@ -955,8 +967,8 @@ def _cross_app_data():
 @app.post("/api/admin/cross-app")
 async def cross_app_action(request: Request, authorization: str = Header(default="")):
     """Cross-app POST actions for ZOne admin panel."""
-    expected = f"Bearer {CROSS_APP_SECRET}"
-    if authorization != expected:
+    token = authorization.replace("Bearer ", "")
+    if token not in VALID_SECRETS:
         raise HTTPException(401, "Unauthorized")
 
     import json
